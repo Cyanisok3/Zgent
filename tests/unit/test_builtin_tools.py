@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from kama_claude.core.tools.builtin.bash import BashTool
-from kama_claude.core.tools.builtin.list_dir import ListDirTool
-from kama_claude.core.tools.builtin.write_file import WriteFileTool
+from cyan.core.tools.builtin.bash import BashTool
+from cyan.core.tools.builtin.list_dir import ListDirTool
+from cyan.core.tools.builtin.write_file import WriteFileTool
 
 # ── bash ──────────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,15 @@ async def test_bash_stderr_merged() -> None:
     assert "err" in result.content
 
 
+# 功能：验证 bash 子进程始终从工具绑定的工作区根目录启动
+# 设计：在临时目录执行 pwd 并比较解析后的绝对路径，直接覆盖 cwd 注入
+@pytest.mark.asyncio
+async def test_bash_uses_workspace_root(tmp_path: Path) -> None:
+    result = await BashTool(tmp_path).invoke({"command": "pwd"})
+    assert not result.is_error
+    assert result.content.strip() == str(tmp_path.resolve())
+
+
 # ── write_file ────────────────────────────────────────────────────────────────
 
 # 功能：验证 write_file 写入文件后内容可以被读取，返回字节数
@@ -53,8 +62,8 @@ async def test_bash_stderr_merged() -> None:
 @pytest.mark.asyncio
 async def test_write_file_creates_and_returns_size(tmp_path: Path) -> None:
     target = tmp_path / "out.txt"
-    result = await WriteFileTool().invoke(
-        {"path": str(target), "content": "hello world"}
+    result = await WriteFileTool(tmp_path).invoke(
+        {"path": "out.txt", "content": "hello world"}
     )
     assert not result.is_error
     assert "11" in result.content  # "hello world" = 11 bytes
@@ -66,7 +75,9 @@ async def test_write_file_creates_and_returns_size(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_write_file_creates_parent_dirs(tmp_path: Path) -> None:
     target = tmp_path / "a" / "b" / "file.txt"
-    result = await WriteFileTool().invoke({"path": str(target), "content": "x"})
+    result = await WriteFileTool(tmp_path).invoke(
+        {"path": "a/b/file.txt", "content": "x"}
+    )
     assert not result.is_error
     assert target.exists()
 
@@ -87,7 +98,7 @@ async def test_write_file_rejects_traversal() -> None:
 async def test_list_dir_shows_files(tmp_path: Path) -> None:
     (tmp_path / "foo.py").write_text("x")
     (tmp_path / "bar.md").write_text("y")
-    result = await ListDirTool().invoke({"path": str(tmp_path)})
+    result = await ListDirTool(tmp_path).invoke({"path": "."})
     assert not result.is_error
     assert "foo.py" in result.content
     assert "bar.md" in result.content
@@ -103,7 +114,7 @@ async def test_list_dir_respects_max_depth(tmp_path: Path) -> None:
     grandchild.mkdir()
     (grandchild / "deep.txt").write_text("x")
 
-    result = await ListDirTool().invoke({"path": str(tmp_path), "max_depth": 1})
+    result = await ListDirTool(tmp_path).invoke({"path": ".", "max_depth": 1})
     assert not result.is_error
     assert "child" in result.content
     assert "deep.txt" not in result.content
@@ -112,9 +123,9 @@ async def test_list_dir_respects_max_depth(tmp_path: Path) -> None:
 # 功能：验证对不存在的路径 list_dir 抛出 FileNotFoundError
 # 设计：直接传入不存在的路径字符串，预期抛出标准异常（invocation.py 捕获后返回 error ToolResult）
 @pytest.mark.asyncio
-async def test_list_dir_missing_path_raises() -> None:
+async def test_list_dir_missing_path_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        await ListDirTool().invoke({"path": "/this/does/not/exist"})
+        await ListDirTool(tmp_path).invoke({"path": "does-not-exist"})
 
 
 # 功能：验证 list_dir 拒绝包含 .. 的路径
@@ -123,3 +134,32 @@ async def test_list_dir_missing_path_raises() -> None:
 async def test_list_dir_rejects_traversal() -> None:
     with pytest.raises(PermissionError):
         await ListDirTool().invoke({"path": "../"})
+
+
+# 功能：验证所有路径型工具拒绝绝对路径
+# 设计：对 list_dir 与 write_file 使用同一个根内绝对路径，排除仅越界路径才被拒绝的误实现
+@pytest.mark.asyncio
+async def test_path_tools_reject_absolute_paths(tmp_path: Path) -> None:
+    with pytest.raises(PermissionError):
+        await ListDirTool(tmp_path).invoke({"path": str(tmp_path)})
+    with pytest.raises(PermissionError):
+        await WriteFileTool(tmp_path).invoke(
+            {"path": str(tmp_path / "out.txt"), "content": "x"}
+        )
+
+
+# 功能：验证 write_file 不会经由根内符号链接写到工作区外
+# 设计：创建指向相邻目录的 symlink 父目录，确认 resolve 后边界检查发生在 mkdir/write 之前
+@pytest.mark.asyncio
+async def test_write_file_rejects_symlink_escape(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (workspace / "link").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PermissionError):
+        await WriteFileTool(workspace).invoke(
+            {"path": "link/escaped.txt", "content": "secret"}
+        )
+    assert not (outside / "escaped.txt").exists()

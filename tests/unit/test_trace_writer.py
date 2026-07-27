@@ -3,8 +3,23 @@ from pathlib import Path
 
 import pytest
 
-from kama_claude.core.trace.record import TraceRecord
-from kama_claude.core.trace.writer import TraceWriter
+from cyan.core.app import _config_log_data, _trace_event_data
+from cyan.core.bus.events import (
+    LlmTokenEvent,
+    LogLineEvent,
+    PatchProposedEvent,
+    PermissionRequestedEvent,
+    RunStartedEvent,
+    SessionMessageReceivedEvent,
+    SkillInvokedEvent,
+    SubagentStartedEvent,
+    ToolCallFailedEvent,
+    ToolCallFinishedEvent,
+    ToolCallStartedEvent,
+)
+from cyan.core.config import CyanConfig, McpServerConfig
+from cyan.core.trace.record import TraceRecord
+from cyan.core.trace.writer import TraceWriter
 
 
 def _record(direction: str = "CORE", kind: str = "event") -> TraceRecord:
@@ -102,3 +117,127 @@ async def test_append_mode_on_restart(tmp_path: Path) -> None:
     await writer2.stop()
 
     assert len(path.read_text().splitlines()) == 2
+
+
+# 功能：验证 daemon event trace 不复制 Incident 工具参数、输出或失败消息
+# 设计：把唯一敏感标记分别放入三类工具事件，再断言 trace 仅保留键名、状态与尺寸摘要
+def test_tool_event_trace_redacts_payloads() -> None:
+    secret = "INCIDENT-RAW-EVIDENCE-秘密"
+    started = _trace_event_data(
+        ToolCallStartedEvent(
+            run_id="run-1",
+            tool_use_id="tool-1",
+            tool_name="propose_patch",
+            params={"patch": secret},
+            ts="2026-01-01T00:00:00Z",
+        )
+    )
+    finished = _trace_event_data(
+        ToolCallFinishedEvent(
+            run_id="run-1",
+            tool_use_id="tool-1",
+            tool_name="read_file",
+            elapsed_ms=1,
+            output=secret,
+            ts="2026-01-01T00:00:00Z",
+        )
+    )
+    failed = _trace_event_data(
+        ToolCallFailedEvent(
+            run_id="run-1",
+            tool_use_id="tool-1",
+            tool_name="read_job_log",
+            error_class="runtime_error",
+            error_message=secret,
+            elapsed_ms=1,
+            ts="2026-01-01T00:00:00Z",
+        )
+    )
+
+    encoded = json.dumps([started, finished, failed], ensure_ascii=False)
+    assert secret not in encoded
+    assert started["param_keys"] == ["patch"]
+    assert started["params_chars"] > 0
+    assert started["params_bytes"] >= started["params_chars"]
+    assert finished["output_chars"] == len(secret)
+    assert finished["output_bytes"] == len(secret.encode())
+    assert failed["error_message_chars"] == len(secret)
+
+
+# 功能：验证其他内容型 EventBus 事件进入 daemon trace 前也统一移除原文
+# 设计：用同一敏感标记覆盖 token、goal、日志、消息、权限、subagent、skill 和 proposal 摘要
+def test_content_event_trace_redacts_text_and_permission_params() -> None:
+    secret = "HIGH-VOLUME-INCIDENT-CONTENT-秘密"
+    timestamp = "2026-01-01T00:00:00Z"
+    events = [
+        RunStartedEvent(run_id="run-1", goal=secret, ts=timestamp),
+        LlmTokenEvent(run_id="run-1", token=secret, ts=timestamp),
+        LogLineEvent(
+            run_id="run-1",
+            level="INFO",
+            source="incident",
+            message=secret,
+            ts=timestamp,
+        ),
+        SessionMessageReceivedEvent(session_id="session-1", content=secret, ts=timestamp),
+        PermissionRequestedEvent(
+            run_id="run-1",
+            tool_use_id="tool-1",
+            tool_name="read_file",
+            params={"path": secret},
+            param_preview=secret,
+            session_id="session-1",
+            ts=timestamp,
+        ),
+        SubagentStartedEvent(
+            run_id="run-child",
+            parent_run_id="run-1",
+            description=secret,
+            ts=timestamp,
+        ),
+        SkillInvokedEvent(
+            skill_name="review",
+            arguments=secret,
+            run_id="run-1",
+            ts=timestamp,
+        ),
+        PatchProposedEvent(
+            job_id="job-1",
+            incident_id="incident-1",
+            proposal_id="proposal-1",
+            summary=secret,
+            ts=timestamp,
+        ),
+    ]
+
+    traced = [_trace_event_data(event) for event in events]
+    encoded = json.dumps(traced, ensure_ascii=False)
+
+    assert secret not in encoded
+    assert traced[0]["goal_chars"] == len(secret)
+    assert traced[1]["token_bytes"] == len(secret.encode())
+    assert traced[4]["param_keys"] == ["path"]
+    assert traced[4]["params_bytes"] > len(secret)
+    assert traced[4]["param_preview_chars"] == len(secret)
+    assert traced[-1]["summary_chars"] == len(secret)
+
+
+# 功能：验证 daemon 启动配置日志不会序列化 MCP 环境变量中的凭据
+# 设计：向配置放入唯一 token，再检查安全摘要只保留 server 数量与非敏感运行字段
+def test_config_log_summary_excludes_mcp_secrets() -> None:
+    secret = "MCP-TOKEN-MUST-NOT-BE-LOGGED"
+    config = CyanConfig()
+    config.mcp.servers.append(
+        McpServerConfig(
+            name="private",
+            command="secret-command",
+            args=["--token", secret],
+            env={"API_TOKEN": secret},
+        )
+    )
+
+    summary = _config_log_data(config)
+
+    assert secret not in json.dumps(summary)
+    assert "secret-command" not in json.dumps(summary)
+    assert summary["mcp_server_count"] == 1

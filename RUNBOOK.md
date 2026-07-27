@@ -1,35 +1,35 @@
-# 运维手册（RUNBOOK）
+# cyan 运维手册
 
-## 日常操作
-
-### 启动守护进程
+## 用户入口
 
 ```bash
-uv run kama-core
+# 从项目根目录启动真实训练任务并进入 TUI
+uv run cyan watch -- python train.py --config configs/base.yaml
+
+# 重新附着最近的运行中或待处理任务
+uv run cyan
 ```
 
-默认监听 `127.0.0.1:7437`，按 `Ctrl+C` 优雅退出。
+`Ctrl+Q` 只 detach。只有 TUI 中显式按 `C` 才请求取消当前进程组。
 
-### 验证连通
+## daemon
+
+正常流程会自动启动 daemon。开发诊断时可单独操作：
 
 ```bash
-uv run kama ping
-# → pong server=0.0.1 uptime=12ms latency=2ms
+uv run cyan core status
+uv run cyan core start
+uv run cyan core stop
+uv run cyan ping
 ```
 
-### 停止守护进程
-
-```bash
-kill $(pgrep -f kama-core)
-```
-
----
+默认监听 `127.0.0.1:7437`，传输为 TCP loopback 上的 NDJSON/JSON-RPC 2.0；配置为
+非 loopback 地址会在 daemon 启动前被拒绝。v1 不启动项目或全局配置中的 MCP server。
 
 ## 配置
 
-优先级（低 → 高）：**内建默认值 → `~/.kama/config.toml` → `.env` → 系统环境变量**。
-
-### `~/.kama/config.toml`
+优先级从低到高为：内建默认值、`~/.cyan/config.toml`、项目 `.cyan/config.toml`、`.env`、
+系统环境变量。
 
 ```toml
 [core]
@@ -37,59 +37,67 @@ host = "127.0.0.1"
 port = 7437
 
 [logging]
-level  = "INFO"
-file   = "~/.kama/logs/core.log"
-format = "text"    # "text" | "json"
+level = "INFO"
+file = "~/.cyan/logs/core.log"
+format = "text"
 ```
 
-### `.env`
+项目可选 smoke：
 
-从 `.env.example` 复制后修改，存放本机配置与密钥（不提交 git）：
+```toml
+[incident.smoke]
+argv = ["python", "smoke_train.py", "--steps", "2"]
+timeout_s = 300
+```
+
+常用环境变量：
+
+| 变量 | 默认值 |
+|---|---|
+| `CYAN_CONFIG` | `~/.cyan/config.toml` |
+| `CYAN_HOST` | `127.0.0.1` |
+| `CYAN_PORT` | `7437` |
+| `CYAN_LOG_LEVEL` | `INFO` |
+| `CYAN_LOG_FILE` | `~/.cyan/logs/core.log` |
+| `CYAN_LOG_FORMAT` | `text` |
+| `CYAN_LLM_DEFAULT_MODEL` | `claude-sonnet-4-6` |
+
+## 诊断文件
 
 ```bash
-cp .env.example .env
+tail -f ~/.cyan/logs/core.log
+find ~/.cyan/jobs -maxdepth 4 -type f
 ```
 
-### 系统环境变量
+- `launch.json` 为 `0600`，不得复制到 issue 或日志；
+- `attempts/*/stdout.log` 与 `stderr.log` 是完整原始输出；
+- `failure.json` 是失败时固定的 capsule；
+- `incidents/*/proposal.diff` 只是 proposal，审批前不会修改 workspace。
+- `incidents/*/smoke-execution.json` 保存可校验的 verifier PID 与启动身份；
+- `traces/daemon.jsonl` 只记录日志、补丁、工具 I/O 和用户文本的字段/体积摘要。
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KAMA_CONFIG` | `~/.kama/config.toml` | 覆盖配置文件路径 |
-| `KAMA_HOST` | `127.0.0.1` | TCP 监听地址 |
-| `KAMA_PORT` | `7437` | TCP 监听端口 |
-| `KAMA_LOG_LEVEL` | `INFO` | 日志级别（DEBUG / INFO / WARNING / ERROR） |
-| `KAMA_LOG_FILE` | `~/.kama/logs/core.log` | 日志文件路径（留空则仅输出 stderr） |
-| `KAMA_LOG_FORMAT` | `text` | 日志格式（`text` 或 `json`） |
+## 常见状态
 
----
+| 状态 | 含义 |
+|---|---|
+| `diagnosing` | 只读 Agent 正在调查 |
+| `awaiting_approval` | diagnosis 与 diff 已就绪 |
+| `smoke_running` | 正在运行用户声明的短验证 |
+| `retry_running` | 已用原命令做最终验证 |
+| `resolved` | 原命令真实退出码为 0 |
+| `stale` | workspace hash 已变化，未应用补丁 |
+| `rollback_blocked` | smoke 后文件又变化，自动回滚被安全阻止 |
+| `unresolved` | 没有可信 proposal 或验证被中断 |
 
-## 开发
+daemon 在 smoke 期间异常退出时，重启恢复会先用 PID、启动身份、session leader 和进程组
+leader 四项校验遗留进程，确认终止后才把 Incident 置为 `unresolved` 并开放追问。
+
+## 开发检查
 
 ```bash
-uv run ruff check src tests scripts   # lint
-uv run mypy src                       # 类型检查
-uv run pytest tests/ -v               # 全量测试
-uv run pytest tests/unit/ -v         # 仅单元测试（无需启动 daemon）
-
-make docs                             # 重新生成 WIRE_PROTOCOL.md
-make verify-s0                        # 完整验证（lint + 类型 + 测试 + 协议同源检查）
+uv run ruff check src tests scripts
+uv run mypy src
+uv run pytest tests/unit -v
+uv run pytest tests/integration -v
+uv run python scripts/gen_protocol_doc.py --check
 ```
-
----
-
-## 日志
-
-```bash
-tail -f ~/.kama/logs/core.log
-```
-
----
-
-## 常见错误
-
-| 报错 | 原因 | 处理 |
-|------|------|------|
-| `core already running at 127.0.0.1:7437` | 已有守护进程在运行 | `kill $(pgrep -f kama-core)` |
-| `core not running` | 未启动守护进程 | `uv run kama-core` |
-| `Address already in use` | 端口被其他进程占用 | `KAMA_PORT=8000 uv run kama-core` |
-| `Config error: KAMA_PORT must be an integer` | `.env` 或环境变量中端口值非整数 | 检查 `KAMA_PORT` 的值 |

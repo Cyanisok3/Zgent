@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kama_claude.core.events.bus import EventBus
-from kama_claude.core.llm.types import LlmResponse, UsageStats
-from kama_claude.core.trace.provider import TracingProvider
-from kama_claude.core.trace.record import TraceRecord
-from kama_claude.core.trace.writer import TraceWriter
+from cyan.core.events.bus import EventBus
+from cyan.core.llm.types import LlmResponse, UsageStats
+from cyan.core.trace.provider import TracingProvider
+from cyan.core.trace.record import TraceRecord
+from cyan.core.trace.writer import TraceWriter
 
 
 def _make_response(stop_reason: str = "end_turn") -> LlmResponse:
@@ -30,8 +30,8 @@ async def _make_writer(tmp_path: Path) -> TraceWriter:
     return w
 
 
-# 功能：验证 chat() 调用前后各 emit 一条 CORE→LLM 和 LLM→CORE 记录
-# 设计：mock inner provider，收集 TraceWriter 收到的 record；断言 direction 顺序和 kind
+# 功能：验证 chat() 默认只 emit 两条不含业务正文的 LLM 摘要记录
+# 设计：mock inner provider 并使用敏感标记，断言方向、类型和默认 fail-closed 脱敏
 @pytest.mark.asyncio
 async def test_emits_api_call_and_api_response(tmp_path: Path) -> None:
     records: list[TraceRecord] = []
@@ -48,11 +48,12 @@ async def test_emits_api_call_and_api_response(tmp_path: Path) -> None:
 
     writer.emit = capturing_emit  # type: ignore[method-assign]
 
+    secret = "DEFAULT-TRACE-SECRET"
     provider = TracingProvider(inner, writer)
     bus = EventBus()
 
     await provider.chat(
-        messages=[{"role": "user", "content": "hi"}],
+        messages=[{"role": "user", "content": secret}],
         tool_schemas=[],
         bus=bus,
         run_id="run-1",
@@ -68,6 +69,9 @@ async def test_emits_api_call_and_api_response(tmp_path: Path) -> None:
     assert records[1].direction == "LLM→CORE"
     assert records[1].kind == "api_response"
     assert records[1].step == 2
+    assert secret not in str(records[0].data)
+    assert "messages" not in records[0].data
+    assert "text" not in records[1].data
 
 
 # 功能：验证 include_payload=True 时 data 包含完整 messages 和 response text

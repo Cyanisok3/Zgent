@@ -3,11 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from kama_claude.core.tools.builtin.bash import BashParams
-from kama_claude.core.tools.builtin.list_dir import ListDirParams
-from kama_claude.core.tools.builtin.note_save import NoteSaveParams
-from kama_claude.core.tools.builtin.read_file import ReadFileParams
-from kama_claude.core.tools.builtin.write_file import WriteFileParams
+from cyan.core.tools.builtin.bash import BashParams
+from cyan.core.tools.builtin.list_dir import ListDirParams
+from cyan.core.tools.builtin.note_save import NoteSaveParams
+from cyan.core.tools.builtin.read_file import ReadFileParams
+from cyan.core.tools.builtin.search_text import SearchTextParams
+from cyan.core.tools.builtin.write_file import WriteFileParams
 
 
 # 功能：验证 BashParams 接受合法参数，缺省 timeout 为 60
@@ -60,6 +61,18 @@ def test_read_file_params_wrong_type() -> None:
         ReadFileParams.model_validate({"path": 42})
 
 
+# 功能：验证 ReadFileParams 的行范围有明确上限
+# 设计：分别覆盖合法边界和超过 1000 行的输入，确保有界读取由 schema 强制
+def test_read_file_params_line_range_bounded() -> None:
+    parsed = ReadFileParams.model_validate(
+        {"path": "README.md", "start_line": 2, "line_count": 1000}
+    )
+    assert parsed.start_line == 2
+    assert parsed.line_count == 1000
+    with pytest.raises(ValidationError):
+        ReadFileParams.model_validate({"path": "README.md", "line_count": 1001})
+
+
 # 功能：验证 WriteFileParams 需要 path 和 content 两个必填字段
 # 设计：分别缺一个字段，覆盖两个 required 字段的独立缺失路径
 def test_write_file_params_missing_fields() -> None:
@@ -90,6 +103,16 @@ def test_list_dir_params_defaults() -> None:
 def test_list_dir_params_max_depth_exceeded() -> None:
     with pytest.raises(ValidationError):
         ListDirParams.model_validate({"max_depth": 5})
+
+
+# 功能：验证 SearchTextParams 对查询和结果数应用默认值与上限
+# 设计：先检查最小输入默认值，再用 101 条结果触发 schema 边界
+def test_search_text_params_are_bounded() -> None:
+    parsed = SearchTextParams.model_validate({"query": "needle"})
+    assert parsed.path == "."
+    assert parsed.max_results == 50
+    with pytest.raises(ValidationError):
+        SearchTextParams.model_validate({"query": "needle", "max_results": 101})
 
 
 # 功能：验证 NoteSaveParams 接受合法 content 字符串

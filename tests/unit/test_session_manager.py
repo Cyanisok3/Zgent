@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from kama_claude.core.bus.envelope import HandlerError
-from kama_claude.core.events.bus import EventBus
-from kama_claude.core.runner import RunOutcome
-from kama_claude.core.session.manager import SESSION_CLOSED, SESSION_NOT_FOUND, SessionManager
-from kama_claude.core.session.model import Session
-from kama_claude.core.session.store import SessionStore
+from cyan.core.bus.envelope import HandlerError
+from cyan.core.events.bus import EventBus
+from cyan.core.runner import RunOutcome
+from cyan.core.session.manager import SESSION_CLOSED, SESSION_NOT_FOUND, SessionManager
+from cyan.core.session.model import Session
+from cyan.core.session.store import SessionStore
 
 
 class _Runner:
@@ -73,7 +73,7 @@ async def test_send_message_chat_enters_waiting_and_writes_thread(tmp_path: Path
 
 
 # 功能：验证 one_shot session 在单次消息完成后自动 closed
-# 设计：复用 mock runner 的成功路径，聚焦 mode 对最终状态的影响，保证 kama run 的统一路径正确
+# 设计：复用 mock runner 的成功路径，聚焦 mode 对最终状态的影响，保证 cyan run 的统一路径正确
 async def test_one_shot_auto_closes(tmp_path: Path) -> None:
     store = SessionStore(tmp_path)
     manager = SessionManager(store, lambda: _Runner(), EventBus())  # type: ignore[arg-type]
@@ -104,3 +104,23 @@ async def test_closed_session_rejects_message(tmp_path: Path) -> None:
     with pytest.raises(HandlerError) as exc:
         await manager.send_message(session.id, "again")
     assert exc.value.code == SESSION_CLOSED
+
+
+# 功能：验证 SessionManager 重建时会恢复磁盘中的 Incident session
+# 设计：先用一个 manager 创建并落盘，再构造新 manager 读取 history，模拟 daemon 重启
+async def test_manager_restores_incident_session_after_restart(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path)
+    first = SessionManager(store, lambda: _Runner(), EventBus())  # type: ignore[arg-type]
+    session = await first.create(
+        "incident",
+        "failed training",
+        workspace_root="/repo",
+        incident_id="inc-1",
+    )
+    store.append_message(session.id, "user", "failure capsule")
+
+    restored = SessionManager(store, lambda: _Runner(), EventBus())  # type: ignore[arg-type]
+
+    assert await restored.get_history(session.id) == [
+        {"role": "user", "content": "failure capsule"}
+    ]

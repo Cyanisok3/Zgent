@@ -1,139 +1,166 @@
-# AGENT.md
+# AGENTS.md
 
-This file provides guidance to codex when working with code in this repository.
+## Design principles
 
-## Design Principles
+### Think before coding
 
-### Think Before Coding
-Don't assume. Don't hide confusion. Surface trade-offs.
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them
-- Don't pick silently.
-- If something is unclear, stop. Name what's confusing. Ask.
+Do not assume or hide ambiguity. State material assumptions and trade-offs.
 
-### Simplicity First
-Minimum code that solves the problem. Nothing speculative.
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- If you write 200 lines and it could be 50, rewrite it.
+### Simplicity first
 
-### Surgical Changes
-Touch only what you must.
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-The test: Every changed line should trace directly to the user's request.
+Implement the minimum code that solves the requested problem. Do not add speculative abstractions,
+middleware, databases, dashboards, or compatibility layers.
 
-### Goal-Driven Execution
-- "Add validation" → "Write tests for invalid inp uts, then make them pass"
-- "Fix the bug" → "Write a test that reproduces i t, then make it pass"
-- "Refactor X" → "Ensure tests pass before and af ter"
+### Surgical changes
+
+Touch only what the task requires. Preserve unrelated user changes and match the existing style.
+
+### Goal-driven execution
+
+For every behavior change, define the observable outcome and verify it with the narrowest useful
+test. Incident integration tests must use real temporary Git repositories and real subprocesses;
+never fake a frontend result.
+
+## Product boundary
+
+cyan is a local ML-training Incident Agent, not an AutoResearch system.
+
+- During training, the daemon only supervises the real process and persists stdout/stderr.
+- A non-zero exit or unexpected signal creates a failure capsule and wakes a fresh read-only Agent.
+- The Agent may diagnose a crash and propose a diff, but it cannot write the workspace or run shell.
+- One explicit approval lets the harness validate and apply that proposal.
+- A user-declared smoke verifier is optional; the original command is always the final verifier.
+- v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
+
+The product surface is the TUI. Normal users need only:
+
+```bash
+cyan watch -- python train.py --config configs/base.yaml
+cyan
+```
+
+The remaining CLI commands are development diagnostics and must not complicate the primary help.
+
+## Architecture
+
+cyan is a dual-process local system:
+
+```text
+cyan / cyan-tui
+    │ TCP loopback, NDJSON framing, JSON-RPC 2.0 commands
+cyan-core
+    ├── JobSupervisor
+    ├── file-backed JobStore
+    ├── IncidentCoordinator
+    ├── AgentRunner / EventBus / ToolRegistry
+    └── SessionManager
+```
+
+The transport is TCP on `127.0.0.1:7437`, not a Unix socket.
+
+### Protocol (`src/cyan/core/bus/`)
+
+Commands and events are Pydantic v2 models discriminated by `type`. When changing these models,
+update their unions and regenerate [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md):
+
+```bash
+uv run python scripts/gen_protocol_doc.py
+uv run python scripts/gen_protocol_doc.py --check
+```
+
+### Job runtime (`src/cyan/core/jobs/`)
+
+`JobSupervisor` is the only owner of long-running process groups. It uses
+`asyncio.create_subprocess_exec`, separate stdout/stderr drains, and exact persisted argv/cwd/env
+for retries. It must never use the generic 120-second `BashTool`.
+
+`JobStore` persists:
+
+```text
+~/.cyan/jobs/<job_id>/
+├── job.json
+├── events.jsonl
+├── launch.json
+├── attempts/<attempt_id>/{attempt.json,stdout.log,stderr.log,failure.json}
+└── incidents/<incident_id>/...
+```
+
+`launch.json` is private (`0600`) and must not be returned by RPC or exposed to the Agent.
+
+### Incident harness (`src/cyan/core/incidents/`)
+
+Incident profiles are rebuilt from persisted metadata on every run. They have a fixed workspace,
+12-step cap, disabled compaction, 256 KiB total log evidence budget, and only these tools:
+
+```text
+read_file, list_dir, search_text, read_job_log, submit_diagnosis, propose_patch
+```
+
+Do not register write, shell, MCP, Skill, TaskManager, or subagent tools for Incident sessions.
+Do not load global/project context or session notes, and do not let slash commands or manual
+compaction override this profile. v1 must not start configured MCP servers.
+
+`propose_patch` writes an artifact only. `PatchService` owns hash checks, path checks,
+`git apply --check`, application, and safe reverse application.
+
+### Events and logs
+
+Raw process output is written only to attempt log files. The TUI reads it by byte cursor; never send
+each log line through EventBus. Incident `events.jsonl` omits per-token events and full tool output.
+IPC subscriptions use bounded per-client queues so slow clients cannot block process output.
+Daemon trace must summarize, rather than copy, logs, patches, tool I/O, token text, and user text.
+
+### Sessions
+
+Session metadata is restored from disk at daemon startup. Reconnecting a TUI must attach to the same
+Job and Incident session. An Incident follow-up must reuse its read-only profile.
+
+### Configuration
+
+Priority is defaults, `~/.cyan/config.toml`, project `.cyan/config.toml`, `.env`, then environment
+variables. Relevant prefixes are `CYAN_*`. The optional smoke declaration is:
+
+```toml
+[incident.smoke]
+argv = ["python", "smoke_train.py", "--steps", "2"]
+timeout_s = 300
+```
+
+The Agent may not modify this file.
+
+An active smoke verifier persists `smoke-execution.json` with PID and process identity. On daemon
+recovery, terminate it only after PID, identity, session leader, and process-group leader all match;
+do not reopen follow-up while the recorded process cannot be confirmed stopped.
 
 ## Commands
 
 ```bash
-# Install / sync dependencies
 uv sync
-
-# Lint
 uv run ruff check src tests scripts
 uv run mypy src
-
-# Tests
-uv run pytest tests/unit -v           # unit only (fast, no daemon)
-uv run pytest tests/integration -v    # needs no running daemon; fixture spawns one
-uv run pytest tests/ -v               # all
-
-# Single test
-uv run pytest tests/unit/test_envelope.py::test_request_roundtrip -v
-
-# Regenerate WIRE_PROTOCOL.md after changing bus models
-uv run python scripts/gen_protocol_doc.py
-
-# Verify WIRE_PROTOCOL.md is in sync (used in CI equivalent)
+uv run pytest tests/unit -v
+uv run pytest tests/integration -v
+uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
-
-# Run daemon manually
-uv run kama-core                        # foreground; Ctrl+C to stop
-KAMA_PORT=8000 uv run kama-core        # override port
-
-# Send a ping
-uv run kama ping
-uv run kama --version
 ```
 
-## Architecture
+## Code style
 
-This is a **dual-process** local AI agent system. `kama-core` is a persistent daemon; `kama` and `kama-tui` are clients that connect to it over a Unix domain socket.
-
-```
-kama-core (daemon)
-  └─ listens on 127.0.0.1:7437 (TCP)
-       ↑ JSON-RPC 2.0 NDJSON
-kama (CLI)   kama-tui (TUI, S2+)
-```
-
-**`kama-tui` is the primary frontend.** All user-facing work on task management, observability, and interaction should be designed for and validated in the TUI first. The `kama` CLI exists only for quick scripted testing and debugging — it is not a product surface. When implementing features that touch the user interface, invest in the TUI layout, event rendering, and keyboard interactions. Do not shortcut TUI work by pointing to the CLI as an alternative.
-
-### Protocol layer (`src/kama_claude/core/bus/`)
-
-All IPC messages are typed pydantic v2 models with a **discriminated union on the `type` field**. This is the contract boundary — adding a new command or event means adding a new model class to `commands.py` or `events.py` and extending the `Command`/`Event` union.
-
-- `envelope.py` — `JsonRpcRequest`, `JsonRpcSuccess`, `JsonRpcError`, error code constants, `make_error()`
-- `commands.py` — `Command` union; currently only `PingCommand` + `PongResult`
-- `events.py` — `Event` union; currently only `CoreStartedEvent`
-
-`WIRE_PROTOCOL.md` is **generated** from these models by `scripts/gen_protocol_doc.py`. Always regenerate and commit it after changing bus models.
-
-### Transport layer (`src/kama_claude/core/transport/`)
-
-- `socket_server.py` — TCP server (`asyncio.start_server`); reads NDJSON lines, dispatches to registered `CommandHandler`s, handles JSON-RPC error cases. On `start()`, probes `host:port` first — errors if another daemon is already listening. Handlers registered via `server.register("method.name", handler_fn)`.
-
-### Config (`src/kama_claude/core/config.py`)
-
-Four-tier priority: **built-in defaults → `~/.kama/config.toml` → `.env` → env vars**.
-
-S0 keys: `host` (default `127.0.0.1`), `port` (default `7437`), `log_level`, `log_file`. Config file is silently skipped if absent; unknown keys cause a hard exit.
-
-Relevant env vars: `KAMA_CONFIG`, `KAMA_HOST`, `KAMA_PORT`, `KAMA_LOG_LEVEL`, `KAMA_LOG_FILE`, `KAMA_LOG_FORMAT`.
-
-### Daemon entry (`src/kama_claude/core/app.py`)
-
-`CoreApp.run()` is the single async entry point: loads config → sets up logging → creates `SocketServer` → registers handlers → waits for `SIGINT`/`SIGTERM` → calls `server.stop()`. Adding new handlers: instantiate a handler method on `CoreApp` and call `server.register()`.
-
-### Testing
-
-Integration tests in `tests/conftest.py` spawn a real daemon subprocess using a random free port (via `free_port` fixture). The fixture finds a free port, releases it, passes it to the daemon via `KAMA_PORT`, then polls `asyncio.open_connection` until the daemon is ready.
-
-### Code style
-
-All functions must have a **single-line Chinese comment** immediately above the `def` line explaining what the function does. Example:
+Every function must have one concise Chinese comment immediately above its `def` line:
 
 ```python
 # 发送 JSON-RPC 响应并刷新写缓冲区
-async def _send(self, writer: asyncio.StreamWriter, msg: BaseModel) -> None:
+async def _send(...) -> None:
     ...
 ```
 
-Do not write multi-line docstrings; one concise Chinese line is enough.
-
-**Test functions** require **two Chinese comment lines** immediately above the `def` line:
+Every test function must have two Chinese comment lines immediately above its `def`:
 
 ```python
-# 功能：验证 publish 后订阅者能收到事件对象
-# 设计：用内联 handler 收集事件引用，断言 is 而非 ==，排除序列化中间步骤的干扰
+# 功能：验证 publish 后订阅者能收到事件
+# 设计：用内联 handler 收集引用，避免引入网络层
 async def test_publish_reaches_subscriber() -> None:
     ...
 ```
 
-- `# 功能：` — 该测试验证的具体行为或不变式，一句话说清楚"测什么"
-- `# 设计：` — 为什么选择这种测试方式：覆盖了什么边界条件、为什么用这个 stub/fixture、这种断言方式相比其他方式的优势
-
-两行注释缺一不可。功能行让读者 5 秒内判断测试意图；设计行让读者理解测试背后的决策，而非只看到操作步骤。
-
-### Design docs (outside the repo)
-
-The planning documents live in `../docs/` (sibling of this repo, not committed here):
-- `agent_development_plan.md` — staged development roadmap S0–S8
-- `s0_implementation_plan.md` — detailed S0 decisions and rationale
-- `agent_functional_outline.md` — full feature catalogue
+Do not add multi-line function docstrings in place of these comments.

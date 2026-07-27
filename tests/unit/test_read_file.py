@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
-from kama_claude.core.tools.builtin.read_file import ReadFileTool
+from cyan.core.tools.builtin.read_file import ReadFileTool
 
 
 # 功能：验证读取存在的文件时返回完整内容且 is_error 为 False
@@ -12,16 +13,19 @@ from kama_claude.core.tools.builtin.read_file import ReadFileTool
 async def test_read_existing_file(tmp_path: Path) -> None:
     f = tmp_path / "hello.txt"
     f.write_text("hello world", encoding="utf-8")
-    result = await ReadFileTool().invoke({"path": str(f)})
+    result = await ReadFileTool(tmp_path).invoke({"path": "hello.txt"})
     assert not result.is_error
-    assert result.content == "hello world"
+    digest = hashlib.sha256(b"hello world").hexdigest()
+    assert result.content == (
+        f"[source hello.txt@sha256:{digest}#L1-L1]\nhello world"
+    )
 
 
 # 功能：验证文件不存在时抛出 FileNotFoundError 而非返回错误 ToolResult
 # 设计：传入不存在的路径，确认 ReadFileTool 不吞掉异常，让调用方（invoke_tool）负责错误分类和事件发布
 async def test_file_not_found_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        await ReadFileTool().invoke({"path": str(tmp_path / "missing.txt")})
+        await ReadFileTool(tmp_path).invoke({"path": "missing.txt"})
 
 
 # 功能：验证包含 `..` 的路径被拒绝并抛出 PermissionError
@@ -43,11 +47,11 @@ async def test_path_traversal_nested_raises() -> None:
 async def test_truncation_over_512kb(tmp_path: Path) -> None:
     f = tmp_path / "big.txt"
     f.write_bytes(b"x" * (600 * 1024))
-    result = await ReadFileTool().invoke({"path": str(f)})
+    result = await ReadFileTool(tmp_path).invoke({"path": "big.txt"})
     assert not result.is_error
     assert result.content.endswith("[truncated]")
-    # Actual text content is exactly 512KB worth of 'x' chars
-    assert result.content.startswith("x" * (512 * 1024))
+    body = result.content.split("\n", maxsplit=1)[1]
+    assert body.startswith("x" * (512 * 1024))
 
 
 # 功能：验证恰好等于 512KB 的文件不被截断（边界值：超过而非大于等于）
@@ -55,17 +59,78 @@ async def test_truncation_over_512kb(tmp_path: Path) -> None:
 async def test_exact_512kb_is_not_truncated(tmp_path: Path) -> None:
     f = tmp_path / "exact.txt"
     f.write_bytes(b"y" * (512 * 1024))
-    result = await ReadFileTool().invoke({"path": str(f)})
+    result = await ReadFileTool(tmp_path).invoke({"path": "exact.txt"})
     assert not result.is_error
     assert not result.content.endswith("[truncated]")
-    assert len(result.content) == 512 * 1024
+    body = result.content.split("\n", maxsplit=1)[1]
+    assert len(body) == 512 * 1024
 
 
-# 功能：验证空文件返回空字符串而非 None 或错误
-# 设计：零字节文件确认 content="" 的正常返回，避免调用方（LLM prompt 组装）对空内容做额外 None 判断
-async def test_empty_file_returns_empty_content(tmp_path: Path) -> None:
+# 功能：验证空文件返回稳定来源引用而非错误
+# 设计：零字节文件没有有效行号，断言 empty 标记让 Agent 仍能引用该文件
+async def test_empty_file_returns_source_reference(tmp_path: Path) -> None:
     f = tmp_path / "empty.txt"
     f.write_text("", encoding="utf-8")
-    result = await ReadFileTool().invoke({"path": str(f)})
+    result = await ReadFileTool(tmp_path).invoke({"path": "empty.txt"})
     assert not result.is_error
-    assert result.content == ""
+    digest = hashlib.sha256(b"").hexdigest()
+    assert result.content == f"[source empty.txt@sha256:{digest}#empty]"
+
+
+# 功能：验证 read_file 只返回请求的 1-based 行范围
+# 设计：从第二行读取两行并同时断言来源引用和正文，覆盖上下界语义
+async def test_read_file_returns_bounded_line_range(tmp_path: Path) -> None:
+    content = "one\ntwo\nthree\nfour\n"
+    (tmp_path / "lines.txt").write_text(content, encoding="utf-8")
+
+    result = await ReadFileTool(tmp_path).invoke(
+        {"path": "lines.txt", "start_line": 2, "line_count": 2}
+    )
+
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    assert result.content == (
+        f"[source lines.txt@sha256:{digest}#L2-L3]\ntwo\nthree\n"
+    )
+
+
+# 功能：验证 read_file 拒绝绝对路径，即使目标位于绑定工作区内
+# 设计：绝对路径不能绕过 workspace-relative 协议，直接使用根内文件覆盖该边界
+async def test_read_file_rejects_absolute_path(tmp_path: Path) -> None:
+    target = tmp_path / "inside.txt"
+    target.write_text("inside", encoding="utf-8")
+
+    with pytest.raises(PermissionError):
+        await ReadFileTool(tmp_path).invoke({"path": str(target)})
+
+
+# 功能：验证 read_file 拒绝解析后指向工作区外的符号链接
+# 设计：根内链接指向相邻文件，覆盖路径文本无 `..` 但 resolve 后越界的情况
+async def test_read_file_rejects_symlink_escape(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (workspace / "link.txt").symlink_to(outside)
+
+    with pytest.raises(PermissionError):
+        await ReadFileTool(workspace).invoke({"path": "link.txt"})
+
+
+# 功能：验证默认 workspace root 在工具构造时捕获而不随进程 cwd 漂移
+# 设计：在第一个目录构造工具后切换到第二个目录，仍应读取第一个目录的同名文件
+async def test_read_file_binds_default_root_at_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "same.txt").write_text("first", encoding="utf-8")
+    (second / "same.txt").write_text("second", encoding="utf-8")
+    monkeypatch.chdir(first)
+    tool = ReadFileTool()
+    monkeypatch.chdir(second)
+
+    result = await tool.invoke({"path": "same.txt"})
+
+    assert result.content.endswith("\nfirst")

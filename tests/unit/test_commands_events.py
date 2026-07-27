@@ -3,8 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from kama_claude.core.bus.commands import PingCommand, PongResult
-from kama_claude.core.bus.events import CoreStartedEvent
+from cyan.core.bus.commands import (
+    CoreShutdownCommand,
+    CoreShutdownResult,
+    PingCommand,
+    PongResult,
+)
+from cyan.core.bus.events import CoreStartedEvent
 
 
 # 功能：验证 PingCommand 序列化后再反序列化，client 和 type 字段完整保留
@@ -37,6 +42,16 @@ def test_pong_result_roundtrip() -> None:
     pong2 = PongResult.model_validate(pong.model_dump())
     assert pong2.server_version == "0.0.1"
     assert pong2.uptime_ms == 42
+
+
+# 功能：验证 daemon 停止命令与响应使用无 PID 的结构化协议
+# 设计：对空参数命令和 stopping 结果做模型往返，锁定 core.shutdown 的最小 wire contract
+def test_core_shutdown_models_roundtrip() -> None:
+    command = CoreShutdownCommand.model_validate({})
+    result = CoreShutdownResult.model_validate({})
+
+    assert command.type == "core.shutdown"
+    assert result.status == "stopping"
 
 
 # 功能：验证 CoreStartedEvent 序列化往返后 listen_addr 和 type 字段正确保留

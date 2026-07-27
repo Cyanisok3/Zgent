@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from kama_claude.core.permissions.manager import PermissionManager
-from kama_claude.core.permissions.policy import PermissionDecision, ToolPolicy
-from kama_claude.core.permissions.storage import load_policy_file
+from cyan.core.permissions.manager import PermissionManager
+from cyan.core.permissions.policy import PermissionDecision, ToolPolicy
+from cyan.core.permissions.storage import load_policy_file
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _make_manager(**policies: ToolPolicy) -> PermissionManager:
-    # policy_file=None：测试中不使用持久化，不污染 ~/.kama/policy.toml
+    # policy_file=None：测试中不使用持久化，不污染 ~/.cyan/policy.toml
     return PermissionManager(policies or None)
 
 

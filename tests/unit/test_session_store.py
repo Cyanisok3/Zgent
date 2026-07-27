@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kama_claude.core.session.model import Session
-from kama_claude.core.session.store import SessionStore
+import pytest
+
+from cyan.core.session.model import Session
+from cyan.core.session.store import SessionStore
 
 
 # 功能：验证 SessionStore 初始化时自动创建 sessions 根目录
@@ -30,6 +32,43 @@ def test_meta_roundtrip(tmp_path: Path) -> None:
     store.write_meta(session)
     loaded = store.read_meta("sess-1")
     assert loaded == session
+
+
+# 功能：验证 session meta 原子替换失败时仍保留上一份完整元数据
+# 设计：先写可读基线，再令 os.replace 抛错，检查旧文件未损坏且临时文件已清理
+def test_meta_replace_failure_preserves_previous_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = SessionStore(tmp_path)
+    original = Session(
+        id="sess-1",
+        mode="chat",
+        status="waiting_for_input",
+        title="before",
+        created_at="t1",
+        updated_at="t1",
+    )
+    store.write_meta(original)
+    updated = Session(
+        id="sess-1",
+        mode="chat",
+        status="running",
+        title="after",
+        created_at="t1",
+        updated_at="t2",
+    )
+
+    # 模拟崩溃发生在临时文件 fsync 后、目标文件原子替换前
+    def fail_replace(source: object, destination: object) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr("cyan.core.session.store.os.replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        store.write_meta(updated)
+
+    assert store.read_meta("sess-1") == original
+    assert list(store.session_dir("sess-1").glob(".meta.json.*.tmp")) == []
 
 
 # 功能：验证含 tool_use/tool_result block 的 thread 消息能按 Anthropic 格式读回
@@ -89,3 +128,24 @@ def test_notes_read_and_append(tmp_path: Path) -> None:
     notes = store.read_notes("sess-1")
     assert "Python 3.12" in notes
     assert "run-1" in notes
+
+
+# 功能：验证 list_meta 能恢复 Incident session 的 workspace 与关联标识
+# 设计：写入两个 session 后重新枚举磁盘，断言排序无关的完整元数据集合
+def test_list_meta_restores_incident_fields(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path)
+    incident = Session(
+        id="sess-incident",
+        mode="incident",
+        status="waiting_for_input",
+        title="failed training",
+        created_at="t1",
+        updated_at="t2",
+        workspace_root="/repo",
+        incident_id="inc-1",
+    )
+    store.write_meta(incident)
+
+    loaded = {session.id: session for session in store.list_meta()}
+
+    assert loaded["sess-incident"] == incident

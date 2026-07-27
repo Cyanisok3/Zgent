@@ -6,9 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from kama_claude.core.bus.events import RunFinishedEvent, RunStartedEvent
-from kama_claude.core.events.bus import EventBus
-from kama_claude.core.events.writer import EventWriter
+from cyan.core.bus.events import (
+    RunFinishedEvent,
+    RunStartedEvent,
+    ToolCallFailedEvent,
+    ToolCallStartedEvent,
+)
+from cyan.core.events.bus import EventBus
+from cyan.core.events.writer import EventWriter
 
 
 # 功能：验证 handle 后事件被正确序列化为单行 JSONL 写入磁盘
@@ -90,7 +95,7 @@ async def test_event_writer_oserror_is_logged(
     path = tmp_path / "events.jsonl"
     event = RunStartedEvent(run_id="r1", goal="g", ts="2026-05-11T00:00:00Z")
 
-    with caplog.at_level(logging.ERROR, logger="kama_claude.core.events.writer"):
+    with caplog.at_level(logging.ERROR, logger="cyan.core.events.writer"):
         async with EventWriter(path) as writer:
             assert writer._file is not None
             writer._file.close()
@@ -98,3 +103,61 @@ async def test_event_writer_oserror_is_logged(
             await writer.handle(event)
 
     assert any("failed to write" in r.message for r in caplog.records)
+
+
+# 功能：验证 Incident 摘要事件不会把工具调用的完整参数持久化到磁盘
+# 设计：在 params 中放入可识别的补丁秘密，只允许键名和字符数摘要出现在 JSONL
+async def test_summary_writer_redacts_tool_call_params(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    secret_patch = "diff --git a/train.py b/train.py\n+SECRET_PATCH_BODY"
+    event = ToolCallStartedEvent(
+        run_id="run-incident",
+        tool_use_id="tool-1",
+        tool_name="propose_patch",
+        params={"patch": secret_patch, "diagnosis_id": "diagnosis-1"},
+        ts="2026-05-11T00:00:00Z",
+    )
+
+    async with EventWriter(path, summary_only=True) as writer:
+        await writer.handle(event)
+
+    persisted = path.read_text(encoding="utf-8")
+    data = json.loads(persisted)
+    assert secret_patch not in persisted
+    assert "params" not in data
+    assert data["param_keys"] == ["diagnosis_id", "patch"]
+    assert data["params_chars"] > len(secret_patch)
+
+
+# 功能：验证 Incident 摘要事件不重复保存 follow-up 原文或工具错误正文
+# 设计：把同一敏感标记放入 run goal 与 failed error，断言 JSONL 只保留字符/字节数
+async def test_summary_writer_redacts_goal_and_tool_error(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    secret = "INCIDENT-FOLLOWUP-OR-ERROR-秘密"
+
+    async with EventWriter(path, summary_only=True) as writer:
+        await writer.handle(
+            RunStartedEvent(
+                run_id="run-incident",
+                goal=secret,
+                ts="2026-05-11T00:00:00Z",
+            )
+        )
+        await writer.handle(
+            ToolCallFailedEvent(
+                run_id="run-incident",
+                tool_use_id="tool-1",
+                tool_name="read_job_log",
+                error_class="runtime_error",
+                error_message=secret,
+                elapsed_ms=1,
+                ts="2026-05-11T00:00:01Z",
+            )
+        )
+
+    persisted = path.read_text(encoding="utf-8")
+    rows = [json.loads(line) for line in persisted.splitlines()]
+    assert secret not in persisted
+    assert rows[0]["goal_chars"] == len(secret)
+    assert rows[0]["goal_bytes"] == len(secret.encode())
+    assert rows[1]["error_message_chars"] == len(secret)

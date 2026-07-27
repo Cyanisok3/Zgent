@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
 
@@ -20,13 +21,18 @@ def free_port() -> int:
 
 
 @pytest.fixture
-async def running_daemon(free_port: int) -> AsyncGenerator[subprocess.Popen[bytes], None]:
+async def running_daemon(
+    free_port: int,
+    tmp_path: Path,
+) -> AsyncGenerator[subprocess.Popen[bytes], None]:
     env = os.environ.copy()
-    env["KAMA_PORT"] = str(free_port)
-    env["KAMA_LOG_FILE"] = ""
-    env["KAMA_LOG_LEVEL"] = "WARNING"
+    env["HOME"] = str(tmp_path)
+    env["ANTHROPIC_API_KEY"] = "test-key"
+    env["CYAN_PORT"] = str(free_port)
+    env["CYAN_LOG_FILE"] = ""
+    env["CYAN_LOG_LEVEL"] = "WARNING"
 
-    proc = subprocess.Popen([sys.executable, "-m", "kama_claude.core"], env=env)
+    proc = subprocess.Popen([sys.executable, "-m", "cyan.core"], env=env)
 
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
@@ -45,9 +51,10 @@ async def running_daemon(free_port: int) -> AsyncGenerator[subprocess.Popen[byte
 
     yield proc
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
