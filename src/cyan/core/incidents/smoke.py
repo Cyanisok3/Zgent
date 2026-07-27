@@ -127,6 +127,7 @@ class SubprocessSmokeExecutor:
                 *config.argv,
                 cwd=resolved_cwd,
                 env=dict(env),
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 start_new_session=True,

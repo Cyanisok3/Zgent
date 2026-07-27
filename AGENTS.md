@@ -73,6 +73,7 @@ uv run python scripts/gen_protocol_doc.py --check
 `JobSupervisor` is the only owner of long-running process groups. It uses
 `asyncio.create_subprocess_exec`, separate stdout/stderr drains, and exact persisted argv/cwd/env
 for retries. It must never use the generic 120-second `BashTool`.
+Daemon-owned training and smoke processes use `DEVNULL` stdin; watched jobs are non-interactive.
 
 `JobStore` persists:
 

@@ -163,6 +163,7 @@ class JobSupervisor:
                 *spec.argv,
                 cwd=spec.workspace_root,
                 env=spec.env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,

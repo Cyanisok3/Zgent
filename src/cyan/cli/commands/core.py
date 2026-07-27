@@ -133,6 +133,7 @@ def cmd_core_start(config: CyanConfig) -> None:
     proc = subprocess.Popen(
         [sys.executable, "-m", "cyan.core"],
         start_new_session=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

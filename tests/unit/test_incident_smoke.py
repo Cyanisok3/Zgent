@@ -80,7 +80,8 @@ async def test_subprocess_smoke_executor_preserves_output(tmp_path: Path) -> Non
         argv=[
             sys.executable,
             "-c",
-            "import os; os.write(1, b'out\\x00bytes'); os.write(2, b'err\\xffbytes')",
+            "import os; assert os.read(0, 1) == b''; "
+            "os.write(1, b'out\\x00bytes'); os.write(2, b'err\\xffbytes')",
         ],
         timeout_s=5,
     )

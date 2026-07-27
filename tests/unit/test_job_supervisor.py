@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -126,6 +127,40 @@ async def test_supervisor_retry_reuses_launch_spec(tmp_path: Path, monkeypatch) 
     assert store.read_attempt(second.id, "attempt-0002").returncode == 0
     assert store.read_spec(second.id).env["CYAN_JOB_VALUE"] == "preserved"
     assert "CYAN_DAEMON_ONLY_SECRET" not in store.read_spec(second.id).env
+
+
+# 功能：验证 daemon 的 stdin 失效后重试仍能以非交互输入启动真实 Python
+# 设计：首轮正常失败后临时关闭父进程 fd 0，再执行真实 retry 并要求子进程从 stdin 读到 EOF
+async def test_supervisor_retry_isolates_revoked_stdin(tmp_path: Path) -> None:
+    store = JobStore(tmp_path / "jobs")
+    supervisor = JobSupervisor(store)
+    code = (
+        "import os; from pathlib import Path; "
+        "p=Path('stdin-retry-marker'); "
+        "retry=p.exists(); "
+        "p.write_text('ready'); "
+        "assert not retry or os.read(0, 1) == b''; "
+        "raise SystemExit(0 if retry else 3)"
+    )
+    started = await supervisor.start(
+        JobSpec(
+            argv=[sys.executable, "-c", code],
+            workspace_root=tmp_path,
+        )
+    )
+    first = await supervisor.wait(started.id)
+    saved_stdin = os.dup(0)
+    try:
+        os.close(0)
+        retried = await supervisor.retry(first.id)
+    finally:
+        os.dup2(saved_stdin, 0)
+        os.close(saved_stdin)
+    second = await supervisor.wait(retried.id)
+
+    assert first.status == "failed"
+    assert second.status == "succeeded"
+    assert store.read_attempt(second.id, "attempt-0002").returncode == 0
 
 
 # 功能：验证无法启动的命令只记录 launch_error，不把产品自身启动错误唤醒为训练 Incident
