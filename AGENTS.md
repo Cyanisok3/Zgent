@@ -2,6 +2,33 @@
 
 This file provides guidance to codex when working with code in this repository.
 
+## Design Principles
+
+### Think Before Coding
+Don't assume. Don't hide confusion. Surface trade-offs.
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them
+- Don't pick silently.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### Simplicity First
+Minimum code that solves the problem. Nothing speculative.
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- If you write 200 lines and it could be 50, rewrite it.
+
+### Surgical Changes
+Touch only what you must.
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+The test: Every changed line should trace directly to the user's request.
+
+### Goal-Driven Execution
+- "Add validation" → "Write tests for invalid inp uts, then make them pass"
+- "Fix the bug" → "Write a test that reproduces i t, then make it pass"
+- "Refactor X" → "Ensure tests pass before and af ter"
+
 ## Commands
 
 ```bash
