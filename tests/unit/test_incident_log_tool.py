@@ -9,6 +9,7 @@ class MemoryLogReader:
     # 使用内存字节串初始化可控日志 reader
     def __init__(self, data: bytes) -> None:
         self.data = data
+        self.bytes_read = 0
 
     # 返回内存日志长度
     async def size(self, job_id: str, attempt_id: str, stream: LogStream) -> int:
@@ -23,7 +24,21 @@ class MemoryLogReader:
         offset: int,
         limit: int,
     ) -> bytes:
-        return self.data[offset : offset + limit]
+        content = self.data[offset : offset + limit]
+        self.bytes_read += len(content)
+        return content
+
+    # 从指定偏移返回内存日志中的首个查询串位置
+    async def search(
+        self,
+        job_id: str,
+        attempt_id: str,
+        stream: LogStream,
+        offset: int,
+        query: bytes,
+    ) -> int | None:
+        found = self.data.find(query, offset)
+        return found if found >= 0 else None
 
 
 # 功能：验证 tail 模式最多返回 32 KiB 且标注精确字节范围
@@ -87,6 +102,30 @@ async def test_read_job_log_search_crosses_chunk_boundary() -> None:
     assert payload["match_offset"] == len(prefix)
     assert "ERROR" in payload["slice"]["content"]
     assert payload["slice"]["end"] - payload["slice"]["start"] <= 64
+
+
+# 功能：验证全文搜索只把返回片段计入证据读取量
+# 设计：把匹配放到 256 KiB 之后，并用 reader 计数确认扫描内容未经过受预算 read
+async def test_read_job_log_search_only_reads_returned_evidence() -> None:
+    marker_offset = 512 * 1024
+    reader = MemoryLogReader(b"x" * marker_offset + b"ROOT_CAUSE" + b"z" * 1024)
+    tool = ReadJobLogTool(reader)
+
+    result = await tool.invoke(
+        {
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "stream": "stderr",
+            "mode": "search",
+            "query": "ROOT_CAUSE",
+            "limit": 128,
+        }
+    )
+
+    payload = json.loads(result.content)
+    assert payload["match_offset"] == marker_offset
+    assert "ROOT_CAUSE" in payload["slice"]["content"]
+    assert reader.bytes_read == 128
 
 
 # 功能：验证 search 未提供 query 时返回 schema_error

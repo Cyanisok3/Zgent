@@ -19,7 +19,12 @@ from cyan.core.bus.events import (
     SmokeFinishedEvent,
 )
 from cyan.core.events.bus import EventBus
-from cyan.core.incidents.log_tool import JobLogReader, LogStream, ReadJobLogTool
+from cyan.core.incidents.log_tool import (
+    FileJobLogReader,
+    JobLogReader,
+    LogStream,
+    ReadJobLogTool,
+)
 from cyan.core.incidents.models import (
     EvidenceRef,
     FailureCapsule,
@@ -222,6 +227,19 @@ class _BudgetedJobLogReader(JobLogReader):
             byte_limit=self._byte_limit,
         )
         return content
+
+    # 扫描当前 Attempt 的完整日志，扫描字节不计入返回证据预算
+    async def search(
+        self,
+        job_id: str,
+        attempt_id: str,
+        stream: LogStream,
+        offset: int,
+        query: bytes,
+    ) -> int | None:
+        self._validate(job_id, attempt_id)
+        reader = FileJobLogReader(self._jobs.log_path)
+        return await reader.search(job_id, attempt_id, stream, offset, query)
 
 
 class IncidentCoordinator:

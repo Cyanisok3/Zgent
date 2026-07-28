@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Protocol
@@ -30,6 +31,35 @@ class JobLogReader(Protocol):
         limit: int,
     ) -> bytes: ...
 
+    # 从指定偏移扫描查询串并返回首个字节位置
+    async def search(
+        self,
+        job_id: str,
+        attempt_id: str,
+        stream: LogStream,
+        offset: int,
+        query: bytes,
+    ) -> int | None: ...
+
+
+# 分块扫描文件并处理跨块匹配，不把扫描内容作为 Agent 证据
+def _search_file(path: Path, offset: int, query: bytes) -> int | None:
+    if not path.exists():
+        return None
+    overlap = b""
+    position = min(offset, path.stat().st_size)
+    with path.open("rb") as handle:
+        handle.seek(position)
+        while raw := handle.read(_SEARCH_CHUNK_BYTES):
+            window = overlap + raw
+            found = window.find(query)
+            if found >= 0:
+                return position - len(overlap) + found
+            overlap_size = max(0, len(query) - 1)
+            overlap = window[-overlap_size:] if overlap_size else b""
+            position += len(raw)
+    return None
+
 
 class FileJobLogReader:
     # 使用路径解析回调初始化本地文件日志 reader
@@ -53,6 +83,18 @@ class FileJobLogReader:
         with path.open("rb") as handle:
             handle.seek(offset)
             return handle.read(limit)
+
+    # 在线程中扫描完整日志，避免长文件搜索阻塞 daemon 事件循环
+    async def search(
+        self,
+        job_id: str,
+        attempt_id: str,
+        stream: LogStream,
+        offset: int,
+        query: bytes,
+    ) -> int | None:
+        path = self._path_resolver(job_id, attempt_id, stream)
+        return await asyncio.to_thread(_search_file, path, offset, query)
 
 
 class ReadJobLogParams(BaseModel):
@@ -93,7 +135,8 @@ class ReadJobLogTool(BaseTool):
     name = "read_job_log"
     description = (
         "Read immutable training stdout or stderr by stable byte range. "
-        "Supports tail, range, and first-match search; each result is limited to 32 KiB."
+        "Supports tail, range, and full-log first-match search from an offset; "
+        "each returned result is limited to 32 KiB."
     )
     input_schema: dict[str, object] = {
         "type": "object",
@@ -144,34 +187,6 @@ class ReadJobLogTool(BaseTool):
             content=raw.decode("utf-8", errors="replace"),
         )
 
-    # 从指定偏移开始查找首个 UTF-8 查询串并返回其字节位置
-    async def _find_first(
-        self,
-        params: ReadJobLogParams,
-        size: int,
-        query: bytes,
-    ) -> int | None:
-        position = min(params.offset, size)
-        overlap = b""
-        while position < size:
-            raw = await self._reader.read(
-                params.job_id,
-                params.attempt_id,
-                params.stream,
-                position,
-                min(_SEARCH_CHUNK_BYTES, size - position),
-            )
-            if not raw:
-                break
-            window = overlap + raw
-            found = window.find(query)
-            if found >= 0:
-                return position - len(overlap) + found
-            overlap_size = max(0, len(query) - 1)
-            overlap = window[-overlap_size:] if overlap_size else b""
-            position += len(raw)
-        return None
-
     # 按 tail、range 或 search 模式返回有界日志及稳定 byte range
     async def invoke(self, params: dict[str, object]) -> ToolResult:
         parsed = ReadJobLogParams.model_validate(params)
@@ -196,9 +211,11 @@ class ReadJobLogTool(BaseTool):
                     is_error=True,
                     error_type="schema_error",
                 )
-            match_offset = await self._find_first(
-                parsed,
-                size,
+            match_offset = await self._reader.search(
+                parsed.job_id,
+                parsed.attempt_id,
+                parsed.stream,
+                parsed.offset,
                 parsed.query.encode("utf-8"),
             )
             if match_offset is None:
