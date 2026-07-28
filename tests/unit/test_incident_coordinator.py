@@ -23,15 +23,6 @@ from cyan.core.processes import read_process_identity
 from cyan.core.runner import AgentRunner
 from cyan.core.session import SessionManager, SessionStore
 
-_FIX_PATCH = """--- a/train.py
-+++ b/train.py
-@@ -1,3 +1,2 @@
- import sys
--print("boom", file=sys.stderr)
--sys.exit(2)
-+print("recovered")
-"""
-
 
 # 功能：验证已观察的工作区和日志范围允许引用其中的稳定子范围
 # 设计：直接覆盖单行、行区间和 byte 区间，排除对 Agent 引用字符串完全相等的依赖
@@ -86,11 +77,23 @@ def _latest_tool_json(messages: list[dict[str, Any]]) -> dict[str, Any]:
     raise AssertionError("tool result missing")
 
 
+# 从 Anthropic messages 尾部取得最近一次工具结果文本
+def _latest_tool_content(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in reversed(content):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                return str(block["content"])
+    raise AssertionError("tool result missing")
+
+
 class _IncidentProvider:
     # 初始化一个按日志、诊断、proposal 顺序调用工具的确定性 provider
     def __init__(self) -> None:
         self._step = 0
-        self._evidence: dict[str, str] = {}
+        self._evidence: list[dict[str, str]] = []
 
     # 根据当前步骤返回受控 Incident 工具调用
     async def chat(
@@ -136,11 +139,35 @@ class _IncidentProvider:
         if self._step == 2:
             log_result = _latest_tool_json(messages)
             reference = str(log_result["reference"])
-            self._evidence = {
-                "source": "stderr",
-                "reference": reference,
-                "description": "The real process emitted the crash marker.",
+            self._evidence = [
+                {
+                    "source": "stderr",
+                    "reference": reference,
+                    "description": "The real process emitted the crash marker.",
+                }
+            ]
+            return LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    ToolCallBlock(
+                        id="read-source",
+                        name="read_file",
+                        input={
+                            "path": "train.py",
+                        },
+                    )
+                ],
+            )
+        if self._step == 3:
+            source_result = _latest_tool_content(messages)
+            source_reference = re.search(r"\[source ([^\]]+)\]", source_result)
+            assert source_reference is not None
+            workspace_evidence = {
+                "source": "workspace",
+                "reference": source_reference.group(1),
+                "description": "The causal exit is present in train.py.",
             }
+            self._evidence.append(workspace_evidence)
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -151,13 +178,13 @@ class _IncidentProvider:
                             "category": "runtime",
                             "summary": "train.py exits deliberately",
                             "root_cause": "The script prints boom and exits with status 2.",
-                            "evidence": [self._evidence],
+                            "evidence": self._evidence,
                             "confidence": 1.0,
                         },
                     )
                 ],
             )
-        if self._step == 3:
+        if self._step == 4:
             diagnosis = _latest_tool_json(messages)
             return LlmResponse(
                 stop_reason="tool_use",
@@ -166,9 +193,14 @@ class _IncidentProvider:
                         id="propose",
                         name="propose_patch",
                         input={
-                            "patch": _FIX_PATCH,
+                            "path": "train.py",
+                            "search": (
+                                'print("boom", file=sys.stderr)\n'
+                                "sys.exit(2)"
+                            ),
+                            "replace": 'print("recovered")',
                             "diagnosis_id": str(diagnosis["id"]),
-                            "evidence": [self._evidence],
+                            "evidence": self._evidence,
                         },
                     )
                 ],

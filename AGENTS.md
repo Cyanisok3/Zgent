@@ -27,7 +27,8 @@ cyan is a local ML-training Incident Agent, not an AutoResearch system.
 
 - During training, the daemon only supervises the real process and persists stdout/stderr.
 - A non-zero exit or unexpected signal creates a failure capsule and wakes a fresh read-only Agent.
-- The Agent may diagnose a crash and propose a diff, but it cannot write the workspace or run shell.
+- The Agent may diagnose a crash and propose one exact single-file SEARCH/REPLACE, but it cannot
+  write the workspace, generate executable diff syntax, or run shell.
 - One explicit approval lets the harness validate and apply that proposal.
 - A user-declared smoke verifier is optional; the original command is always the final verifier.
 - v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
@@ -108,8 +109,10 @@ Do not register write, shell, MCP, Skill, TaskManager, or subagent tools for Inc
 Do not load global/project context or session notes, and do not let slash commands or manual
 compaction override this profile. v1 must not start configured MCP servers.
 
-`propose_patch` writes an artifact only. `PatchService` owns hash checks, path checks,
-`git apply --check`, application, and safe reverse application.
+`propose_patch` requires matching workspace evidence, performs one exact unique replacement in
+memory, and writes the harness-generated diff as an artifact only. v1 edits one existing UTF-8 text
+file of at most 1 MiB; it does not create, delete, rename, or fuzzily match files. `PatchService`
+owns hash checks, path checks, `git apply --check`, application, and safe reverse application.
 
 ### Events and logs
 

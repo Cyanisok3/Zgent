@@ -93,7 +93,8 @@ context。
 - 训练阶段：只监管进程并无损保存日志，不创建 LLM context。
 - 失败阶段：从固定 failure capsule 启动新的 Incident context。
 - 调查阶段：Agent 只能读当前 workspace、检索有界日志并写 Incident artifact。
-- 修改阶段：Agent 不能直接写仓库；只有 harness 能在一次显式批准后应用对应 diff。
+- 修改阶段：Agent 只提交单文件精确 SEARCH/REPLACE；harness 从真实文件生成 diff，且只有
+  一次显式批准后才能应用。
 - 验证阶段：smoke 只是可选短门禁，最终真值始终是原命令的真实退出状态。
 
 ## 评测导出
@@ -134,7 +135,9 @@ byte-range 或 `path@sha256#line` 引用。完整 stdout/stderr 只保存一次�
 补丁应用前会重新检查：
 
 - 当前目录确实是 Git worktree 根；
-- diff 不包含 binary、rename/copy、symlink、submodule、`.git` 或 verifier 配置；
+- SEARCH 在对应当前文件中精确且唯一，目标是已有、不超过 1 MiB 的 UTF-8 文本文件；
+- harness 生成的 diff 只修改该文件，不包含 create/delete、rename/copy、binary、
+  symlink、submodule、`.git` 或 verifier 配置；
 - proposal 的 patch hash、目标路径和原文件 SHA-256 未变化；
 - `git apply --check` 成功。
 

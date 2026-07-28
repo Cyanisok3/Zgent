@@ -142,3 +142,74 @@ step budget、写权限、常驻 subagent、memory 层或先开发 VS Code 插�
 
 最终代码验收为 Ruff 通过、mypy 通过、协议文档一致，完整 pytest
 `415 passed in 38.38s`。
+
+## 2026-07-29 确定性 diff 生成回归
+
+### 版本与范围
+
+本节测试基于 cyan commit `d148b34e3cc70a3e343f9a29746c55ae53168172` 加本轮未提交
+增量；不含本报告的产品、测试和文档 diff SHA-256 为
+`1f1fbb6d482ec98ae6b25f02a85dc00125481923808422fdf26063e9b10431b0`。
+Incident Agent 不再手写 unified diff，而是提交单文件精确 SEARCH/REPLACE；harness 从
+当前真实文件在内存中生成 diff，再复用原 Proposal、Git preflight、审批和原命令复验链路。
+
+测试继续使用原冻结 ground truth、三个原独立 PyTorch 环境和
+`deepseek-v4-flash`。所有病例均从对应故障 commit 重新本地克隆。未重复 tail-only、正常
+训练和性能交替测试，因为本轮未修改诊断基线或进程监督热路径；对应冻结结果仍为 tail-only
+11/18、正常训练误触发 0/15、中位运行时开销 +56.4%/-0.5%/-0.8%。
+
+### 第一轮 gate
+
+上一轮最终失败的四个病例各独立运行两次。8/8 均生成通过 Git preflight 的 proposal，
+8/8 审批后由原命令复验为 `resolved`；不可应用 proposal 到达审批为 0，审批前 tracked
+写入为 0。因此按预设门禁进入完整 18 次回归。
+
+### 完整 18 次回归
+
+| Workload | 诊断正确 | 长日志正确 | 首次批准后成功 | 非代码病例正确克制 |
+|---|---:|---:|---:|---:|
+| FastestDet | 6/6 | 2/2 | 3/4 | 2/2 |
+| MNIST | 6/6 | 2/2 | 4/4 | 2/2 |
+| Word language model | 6/6 | 2/2 | 4/4 | 2/2 |
+| **合计** | **18/18** | **6/6** | **11/12** | **6/6** |
+
+| 验收项 | 目标 | 实测 | 结果 |
+|---|---:|---:|---|
+| 非零退出侦测率 | 100% | 18/18 | 通过 |
+| 根因与证据正确率 | ≥80% | 18/18，100% | 通过 |
+| 长日志正确率 | ≥5/6 | 6/6 | 通过 |
+| 首次批准后原命令成功 | ≥10/12 | 11/12，91.7% | 通过 |
+| 非代码故障不产生 proposal | 6/6 | 6/6 | 通过 |
+| 不可应用 proposal 到达审批 | 0 | 0 | 通过 |
+| 批准前 tracked 写入 | 0 | 0 | 通过 |
+| 相对冻结 tail-only 提升 | ≥15 pp | 100% vs 61.1%，+38.9 pp | 通过 |
+| `launch.json` 权限 | 全部 `0600` | 18/18 | 通过 |
+| RPC 暴露环境或 `launch.json` | 0 | 0/18 | 通过 |
+
+诊断中位耗时为 20.9 秒，终态中位耗时为 26.6 秒；共调用工具 113 次，记录
+input/output token 158,923/50,625，Agent 主动读取日志证据 35,600 bytes。三个 workload
+还各自通过一次真实 Textual TUI 执行 `/monitor → /start`，proposal 到达后均由聚焦的
+上下文选择器接收 Enter 审批并最终 `resolved`。
+
+唯一未 resolved 的 `fastestdet-long-r1` 已提交正确 diagnosis 和正确 SEARCH/REPLACE，
+但模型把工具返回的 diagnosis ID 中一个字符 `d` 抄成 `e`，随后重复提交错误 ID并耗尽
+12 steps。该失败不是 diff 格式、精确匹配或 Git preflight 问题；同一冻结病例在 gate
+两次和完整回归另一次均 resolved。它提示下一项窄缺陷是让 harness 避免要求模型复述刚生成
+的 artifact ID，而不是重新引入 raw diff、fuzzy、更多 steps 或写权限。
+
+### 结论与产物
+
+本轮消除了上一版最主要的格式阻断：可修补病例的原命令成功率由 8/12 提升到 11/12，
+同时保持单文件最小修改、非代码故障克制和批准前零 tracked 写入。对当前本地
+CPU/PyTorch 范围，产品的“失败后只读取证、显式批准、真实重跑”定位与核心功能已基本一致。
+
+隔离产物位于：
+
+- gate、完整回归、TUI 机器结果：`/private/tmp/cyan-diff-gate-SccMui/`
+- Job、Incident、原始日志和 session events：
+  `/private/tmp/cyan-diff-gate-SccMui/home/.cyan/`
+
+最终代码验收为 Ruff、mypy、协议文档一致性检查全部通过，完整 pytest
+`423 passed in 38.88s`。
+
+本结论仍不外推到 CUDA、NCCL、多机训练、OOM、系统休眠或静默收敛故障。

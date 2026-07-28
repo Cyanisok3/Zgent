@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from cyan.core.incidents.patch import PatchError, PatchService
+from cyan.core.incidents.patch import (
+    PatchError,
+    PatchService,
+    build_replacement_diff,
+)
 from cyan.core.incidents.store import IncidentStore
 from cyan.core.incidents.tools import ProposePatchTool
 
@@ -15,30 +20,75 @@ def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
 
 
-# 生成修改 train.py 第一行的有效 Git unified diff
-def _patch(old: str, new: str) -> str:
-    return (
-        "diff --git a/train.py b/train.py\n"
-        "--- a/train.py\n"
-        "+++ b/train.py\n"
-        "@@ -1 +1 @@\n"
-        f"-{old}\n"
-        f"+{new}\n"
-    )
-
-
 # 构造已保存 proposal 并返回对应 store
 async def _proposal(tmp_path: Path, old: str, new: str) -> tuple[Path, IncidentStore]:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     _init_repo(workspace)
-    (workspace / "train.py").write_text(old + "\n", encoding="utf-8")
+    target = workspace / "train.py"
+    target.write_text(old + "\n", encoding="utf-8")
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
     store = IncidentStore(tmp_path / "incidents")
     result = await ProposePatchTool(store, "incident-1", workspace).invoke(
-        {"patch": _patch(old, new)}
+        {
+            "path": "train.py",
+            "search": old,
+            "replace": new,
+            "evidence": [
+                {
+                    "source": "workspace",
+                    "reference": f"train.py@sha256:{digest}#L1-L1",
+                    "description": "Observed source line.",
+                }
+            ],
+        }
     )
     assert not result.is_error
     return workspace, store
+
+
+@pytest.mark.parametrize(
+    ("original", "updated"),
+    [
+        (b"old\n", b"new\n"),
+        (b"first\nold one\nold two\nlast\n", b"first\nnew one\nnew two\nlast\n"),
+        (b"first\nremove\nlast\n", b"first\nlast\n"),
+        (b"old", b"new"),
+        (b"old\r\nnext\r\n", b"new\r\nnext\r\n"),
+    ],
+)
+# 功能：验证本地 diff 构造覆盖单行、多行、删除、无末尾换行和 CRLF
+# 设计：对每组真实字节运行 git apply --check 和 apply，并比较最终字节语义
+def test_build_replacement_diff_is_git_applicable(
+    tmp_path: Path,
+    original: bytes,
+    updated: bytes,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    _init_repo(workspace)
+    target = workspace / "train.py"
+    target.write_bytes(original)
+    patch = build_replacement_diff(
+        "train.py",
+        original.decode("utf-8"),
+        updated.decode("utf-8"),
+    )
+    patch_path = tmp_path / "proposal.diff"
+    patch_path.write_bytes(patch.encode("utf-8"))
+
+    subprocess.run(
+        ["git", "-C", str(workspace), "apply", "--check", str(patch_path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "apply", str(patch_path)],
+        check=True,
+        capture_output=True,
+    )
+
+    assert target.read_bytes() == updated
 
 
 # 功能：验证 PatchService 经 git apply --check 应用并可按 receipt 安全反向恢复

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -91,6 +92,33 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(64 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+# 从替换前后文本生成保留行尾语义的标准 unified diff
+def build_replacement_diff(path: str, original: str, updated: str) -> str:
+    if original == updated:
+        raise PatchError("replacement does not change the file")
+    lines = difflib.unified_diff(
+        original.splitlines(keepends=True),
+        updated.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        lineterm="\n",
+    )
+    rendered: list[str] = []
+    for line in lines:
+        if (
+            line.startswith((" ", "-", "+"))
+            and not line.startswith(("--- ", "+++ "))
+            and not line.endswith(("\n", "\r"))
+        ):
+            rendered.extend((f"{line}\n", "\\ No newline at end of file\n"))
+        else:
+            rendered.append(line)
+    patch = "".join(rendered)
+    if not patch:
+        raise PatchError("replacement produced an empty diff")
+    return patch
 
 
 # 规范化 unified diff 文件头路径并拒绝危险路径
