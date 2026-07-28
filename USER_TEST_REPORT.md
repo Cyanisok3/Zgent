@@ -74,3 +74,71 @@ FastestDet 的 +56.4% 来自约 3.6 秒的极短 fixture 上约 2 秒固定开�
 `/private/tmp/cyan-pilot-e217-oPUULu/artifacts/`
 
 cyan 的原始 Job/Incident/日志仍按产品机制保存在 `~/.cyan/jobs/`；对应 Job ID 可由 `artifacts/pilot-results.json` 反查。测试过程中未修改 cyan 产品代码。
+
+## 2026-07-28 修补后回归
+
+### 版本与范围
+
+本节保留上方原始 Pilot 结果，并记录两阶段核心闭环修补后的独立回归。测试版本以
+`c67bb255ddb33b07837cef33af5d35edaf1f40c0` 为基线，产品、测试和文档增量（不含本报告）
+的 SHA-256 为 `2606c17e9ee33ef6907cc1ed27781d6ad429a1d8d9a309648359747c9f314660`。
+
+回归继续使用原冻结 ground truth、三个原 PyTorch 环境和
+`deepseek-v4-flash`。所有病例都从故障 commit 重新本地克隆，未复用旧批准流程修改过的
+工作区。未重复 tail-only、15 次正常训练或性能交替测试：这些冻结结果仍分别为 11/18、
+0/15 误触发和 FastestDet/MNIST/WLM 中位开销 +56.4%/-0.5%/-0.8%；本次改动未修改进程
+监督热路径。
+
+### 最终 18 次回归
+
+| Workload | 诊断正确 | 长日志正确 | 首次批准后成功 | 非代码病例正确克制 |
+|---|---:|---:|---:|---:|
+| FastestDet | 6/6 | 2/2 | 3/4 | 2/2 |
+| MNIST | 6/6 | 2/2 | 3/4 | 2/2 |
+| Word language model | 6/6 | 2/2 | 2/4 | 2/2 |
+| **合计** | **18/18** | **6/6** | **8/12** | **6/6** |
+
+| 验收项 | 目标 | 修补后实测 | 结果 |
+|---|---:|---:|---|
+| 非零退出侦测率 | 100% | 18/18 | 通过 |
+| 正常训练误触发 | 0% | 保留原冻结 0/15 | 通过 |
+| 根因与证据正确率 | ≥80% | 18/18，100% | 通过 |
+| 长日志正确率 | ≥5/6 | 6/6 | 通过 |
+| 首次批准后原命令成功率 | ≥75% | 8/12，66.7% | **未通过** |
+| 非代码故障不提无关补丁 | 6/6 | 6/6 | 通过 |
+| 不可应用 proposal 到达审批 | 0 | 0 | 通过 |
+| 批准前 tracked 写入 | 0 | 0 | 通过 |
+| 相对冻结 tail-only 提升 | ≥15 pp | 100% vs 61.1%，+38.9 pp | 通过 |
+| `launch.json` 权限 | 全部 `0600` | 18/18 | 通过 |
+| RPC 不暴露启动环境 | 0 | 0/18 | 通过 |
+
+诊断中位耗时为 17.6 秒，终态中位耗时为 26.6 秒；共调用工具 145 次，记录
+input/output token 168,971/69,397，Agent 主动读取日志证据 36,323 bytes。所有 18 个
+diagnosis 均按冻结 ground truth 人工复核，证据引用同时通过 harness 的身份和子范围校验。
+
+### 定向与 TUI 回归
+
+- 原先 4 个 evidence-rejection 病例现在全部提交正确 diagnosis；未增加 12-step cap。
+- 原先 4 个损坏 diff 病例中，3 个在批准后通过原命令，1 个因 Agent 未在 12 步内生成
+  合法 hunk 而保持 unresolved；所有损坏候选都在审批前被清除。
+- 多历史任务不再阻塞新 `/monitor`，真实 daemon、真实 Git 仓库和真实子进程集成测试通过。
+- FastestDet 通过真实 TUI 鼠标选择器批准并 resolved；MNIST 通过真实 TUI Enter 批准并
+  resolved。
+- WLM 两次真实 TUI 尝试都提交了正确 diagnosis，但没有生成 preflight-valid proposal，
+  因而按设计不显示审批选择器；该 workload 的 `↑↓ + Enter` 真实 LLM 路径未完成。键盘和
+  鼠标事件映射本身由 Textual DOM 测试覆盖，但不能替代这项未完成的真实 Agent 验收。
+
+### 结论
+
+修补后，产品定位与 diagnosis 功能已经一致：真实训练崩溃能够稳定触发只读取证，长日志
+检索有效，启动参数、数据和环境故障能克制地停在操作建议，且坏补丁不再到达用户审批。
+主要剩余缺陷已从“诊断与系统阻断”收敛为“LLM 生成 unified diff 的格式稳定性”：最终解决率
+为 66.7%，仍不满足 75% 门槛。因此下一步应继续优化最小补丁表示或生成约束，而不是增加
+step budget、写权限、常驻 subagent、memory 层或先开发 VS Code 插件。
+
+机器结果与本轮隔离日志位于：
+
+`/private/tmp/cyan-pilot-regression-uKXnPl/artifacts/final-regression-results.json`
+
+最终代码验收为 Ruff 通过、mypy 通过、协议文档一致，完整 pytest
+`415 passed in 38.38s`。

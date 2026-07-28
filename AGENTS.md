@@ -44,7 +44,9 @@ development diagnostics and must not complicate the primary help. `/monitor` is 
 the harness parses and previews the command without an Agent or shell, then reuses `job.start`.
 Typing `/` must show keyboard-selectable local commands and ordinary chat skills. Ordinary chat
 permission requests use the existing `permission.*` events and `permission.respond`; this must not
-broaden the read-only Incident profile.
+broaden the read-only Incident profile. Patch approval, rejection, and running-job cancellation are
+contextual TUI selectors, not slash commands or global single-key bindings. Multiple recoverable
+Jobs must not block the chat prompt; `/jobs` opens their selector explicitly.
 
 ## Architecture
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from cyan.core.incidents.patch import PatchService
 from cyan.core.incidents.store import IncidentStore
 from cyan.core.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
 
@@ -110,6 +112,69 @@ async def test_propose_patch_does_not_modify_workspace(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "old\n"
     assert proposal.files[0].base_sha256 is not None
     assert store.read_patch(proposal) == patch
+
+
+# 功能：验证损坏 diff 在审批前被真实 Git 拒绝且 Agent 可重新提交正确 proposal
+# 设计：先提交 Pilot 同类错误 hunk 行数，再提交有效 diff，检查 artifact 清理和零工作区写入
+async def test_propose_patch_preflight_rejects_corrupt_diff(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    target = workspace / "train.py"
+    target.write_text("old\n", encoding="utf-8")
+    store = IncidentStore(tmp_path / "incidents")
+    tool = ProposePatchTool(
+        store,
+        "incident-1",
+        workspace,
+        patch_service=PatchService(workspace),
+    )
+    corrupt = (
+        "--- a/train.py\n"
+        "+++ b/train.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+
+    rejected = await tool.invoke({"patch": corrupt})
+
+    assert rejected.is_error
+    assert "corrupt patch" in rejected.content
+    assert not (store.incident_dir("incident-1") / "proposal.json").exists()
+    assert not (store.incident_dir("incident-1") / "proposal.diff").exists()
+    assert target.read_text(encoding="utf-8") == "old\n"
+
+    accepted = await tool.invoke({"patch": _modify_patch("train.py", "old", "new")})
+
+    assert not accepted.is_error
+    assert store.read_proposal("incident-1").files[0].path == "train.py"
+    assert target.read_text(encoding="utf-8") == "old\n"
+
+
+# 功能：验证 LLM 省略 diff 末尾换行时仍能通过真实 Git 审批前校验
+# 设计：移除有效 patch 的最后换行，断言 artifact 被规范化且工作区保持只读
+async def test_propose_patch_normalizes_terminal_newline(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    target = workspace / "train.py"
+    target.write_text("old\n", encoding="utf-8")
+    store = IncidentStore(tmp_path / "incidents")
+    tool = ProposePatchTool(
+        store,
+        "incident-1",
+        workspace,
+        patch_service=PatchService(workspace),
+    )
+    patch = _modify_patch("train.py", "old", "new").removesuffix("\n")
+
+    result = await tool.invoke({"patch": patch})
+
+    assert not result.is_error
+    proposal = store.read_proposal("incident-1")
+    assert store.read_patch(proposal) == f"{patch}\n"
+    assert target.read_text(encoding="utf-8") == "old\n"
 
 
 @pytest.mark.parametrize(

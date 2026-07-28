@@ -134,3 +134,30 @@ async def test_read_file_binds_default_root_at_construction(
     result = await tool.invoke({"path": "same.txt"})
 
     assert result.content.endswith("\nfirst")
+
+
+# 功能：验证 Incident 文本模式拒绝含 NUL 的二进制模型文件
+# 设计：构造最小 binary 文件并启用 text_only，防止 checkpoint 内容进入 LLM 上下文
+async def test_text_only_read_file_rejects_binary(tmp_path: Path) -> None:
+    (tmp_path / "model.pt").write_bytes(b"PK\x00binary")
+
+    with pytest.raises(ValueError, match="binary file cannot be read as text"):
+        await ReadFileTool(tmp_path, text_only=True).invoke({"path": "model.pt"})
+
+
+# 功能：验证 Incident 可将单次文本证据限制为64 KiB而不改变默认上限
+# 设计：分别使用定制和默认工具读取同一大文件，比较截断正文长度
+async def test_read_file_supports_incident_specific_byte_limit(tmp_path: Path) -> None:
+    (tmp_path / "source.py").write_bytes(b"x" * (80 * 1024))
+
+    bounded = await ReadFileTool(tmp_path, max_bytes=64 * 1024).invoke(
+        {"path": "source.py"}
+    )
+    default = await ReadFileTool(tmp_path).invoke({"path": "source.py"})
+
+    bounded_body = bounded.content.split("\n", maxsplit=1)[1]
+    default_body = default.content.split("\n", maxsplit=1)[1]
+    assert bounded_body.startswith("x" * (64 * 1024))
+    assert bounded.content.endswith("[truncated]")
+    assert not default.content.endswith("[truncated]")
+    assert len(default_body) == 80 * 1024

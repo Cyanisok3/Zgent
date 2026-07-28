@@ -15,6 +15,7 @@ from cyan.core.incidents.models import (
 )
 from cyan.core.incidents.patch import (
     PatchError,
+    PatchService,
     build_proposal_files,
     parse_unified_diff,
     sha256_bytes,
@@ -106,11 +107,13 @@ class ProposePatchTool(BaseTool):
         workspace_root: Path,
         *,
         evidence_validator: EvidenceValidator | None = None,
+        patch_service: PatchService | None = None,
     ) -> None:
         self._store = store
         self._incident_id = incident_id
         self._workspace_root = workspace_root.resolve(strict=True)
         self._evidence_validator = evidence_validator
+        self._patch_service = patch_service
 
     # 校验 diff 并只向 incident artifact 目录写 proposal
     async def invoke(self, params: dict[str, object]) -> ToolResult:
@@ -121,14 +124,17 @@ class ProposePatchTool(BaseTool):
         )
         if evidence_error is not None:
             return _validation_error(evidence_error)
-        patch_bytes = parsed_params.patch.encode("utf-8")
+        patch = parsed_params.patch
+        if not patch.endswith("\n"):
+            patch += "\n"
+        patch_bytes = patch.encode("utf-8")
         if len(patch_bytes) > _MAX_PATCH_BYTES:
             return _validation_error(
                 f"patch is too large: {len(patch_bytes)} bytes "
                 f"(limit {_MAX_PATCH_BYTES})"
             )
         try:
-            parsed_files = parse_unified_diff(parsed_params.patch)
+            parsed_files = parse_unified_diff(patch)
             files = build_proposal_files(self._workspace_root, parsed_files)
             if parsed_params.diagnosis_id is not None:
                 diagnosis = self._store.read_diagnosis(self._incident_id)
@@ -146,7 +152,16 @@ class ProposePatchTool(BaseTool):
             evidence=parsed_params.evidence,
             created_at=datetime.now(UTC),
         )
-        self._store.write_proposal(proposal, parsed_params.patch)
+        self._store.write_proposal(proposal, patch)
+        if self._patch_service is not None:
+            try:
+                await self._patch_service.check(
+                    proposal,
+                    self._store.patch_path(proposal),
+                )
+            except (OSError, PatchError, ValueError) as exc:
+                self._store.clear_proposal(self._incident_id)
+                return _validation_error(str(exc))
         return ToolResult(content=proposal.model_dump_json())
 
 

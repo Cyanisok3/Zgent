@@ -298,13 +298,17 @@ class PatchService:
             applied_at=datetime.now(UTC),
         )
 
-    # 复验哈希和 git apply --check 后原子应用 proposal
-    async def apply(self, proposal: Proposal, patch_path: Path) -> PatchReceipt:
+    # 只读校验 proposal 当前可应用，不修改工作区
+    async def check(self, proposal: Proposal, patch_path: Path) -> None:
         await self._ensure_git_root()
         await self._ensure_no_submodule_targets(proposal)
         self._verify_base_state(proposal, patch_path)
         await self._git("apply", "--check", str(patch_path))
         self._verify_base_state(proposal, patch_path)
+
+    # 复用只读校验后应用 proposal 并记录 receipt
+    async def apply(self, proposal: Proposal, patch_path: Path) -> PatchReceipt:
+        await self.check(proposal, patch_path)
         await self._git("apply", str(patch_path))
         return self._build_receipt(proposal)
 

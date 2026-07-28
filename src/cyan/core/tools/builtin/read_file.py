@@ -58,9 +58,21 @@ class ReadFileTool(BaseTool):
         root: str | Path | None = None,
         *,
         evidence_refs: set[str] | None = None,
+        max_bytes: int = _MAX_BYTES,
+        text_only: bool = False,
     ) -> None:
+        if max_bytes < 1 or max_bytes > _MAX_BYTES:
+            raise ValueError(f"max_bytes must be between 1 and {_MAX_BYTES}")
         self.root = normalize_workspace_root(root)
         self._evidence_refs = evidence_refs
+        self._max_bytes = max_bytes
+        self._text_only = text_only
+        self.description = (
+            "Read the text content of a file. "
+            "Path must be relative to the bound workspace root. "
+            "Supports a bounded 1-based line range and returns a stable source reference. "
+            f"Output larger than {max_bytes // 1024} KiB is truncated."
+        )
 
     # 在线程中扫描文件并返回正文和稳定引用，避免大文件哈希阻塞 daemon event loop
     def _read_sync(self, parsed: ReadFileParams) -> tuple[str, str]:
@@ -70,10 +82,12 @@ class ReadFileTool(BaseTool):
         first_line: int | None = None
         last_line: int | None = None
         byte_truncated = False
+        binary = False
 
         with path.open("rb") as file:
             for line_number, line in enumerate(file, start=1):
                 digest.update(line)
+                binary = binary or b"\0" in line
                 if line_number < parsed.start_line:
                     continue
                 if (
@@ -84,7 +98,7 @@ class ReadFileTool(BaseTool):
                 if byte_truncated:
                     continue
 
-                remaining = _MAX_BYTES - len(selected)
+                remaining = self._max_bytes - len(selected)
                 if remaining == 0:
                     byte_truncated = True
                     continue
@@ -98,6 +112,8 @@ class ReadFileTool(BaseTool):
                 first_line = first_line or line_number
                 last_line = line_number
 
+        if self._text_only and binary:
+            raise ValueError(f"binary file cannot be read as text: {parsed.path}")
         relative = workspace_relative_path(self.root, path)
         line_reference = (
             "empty"

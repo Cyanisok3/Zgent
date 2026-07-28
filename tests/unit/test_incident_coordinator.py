@@ -11,7 +11,10 @@ from typing import Any, cast
 
 from cyan.core.config import CyanConfig
 from cyan.core.events.bus import EventBus
-from cyan.core.incidents.coordinator import IncidentCoordinator
+from cyan.core.incidents.coordinator import (
+    IncidentCoordinator,
+    _reference_was_observed,
+)
 from cyan.core.incidents.smoke import SmokeExecution
 from cyan.core.incidents.store import IncidentStore
 from cyan.core.jobs import JobSpec, JobStore, JobSupervisor
@@ -28,6 +31,47 @@ _FIX_PATCH = """--- a/train.py
 -sys.exit(2)
 +print("recovered")
 """
+
+
+# 功能：验证已观察的工作区和日志范围允许引用其中的稳定子范围
+# 设计：直接覆盖单行、行区间和 byte 区间，排除对 Agent 引用字符串完全相等的依赖
+def test_evidence_reference_accepts_observed_subranges() -> None:
+    digest = "a" * 64
+    observed = {
+        f"train.py@sha256:{digest}#L15-L23",
+        "stderr:job-1/attempt-1@bytes:100-200",
+    }
+
+    assert _reference_was_observed(f"train.py@sha256:{digest}#L23", observed)
+    assert _reference_was_observed(f"train.py@sha256:{digest}#L17-L18", observed)
+    assert _reference_was_observed(
+        "stderr:job-1/attempt-1@bytes:120-180",
+        observed,
+    )
+
+
+# 功能：验证 evidence 子范围不能扩大边界或替换来源身份
+# 设计：逐一改变行范围、文件 hash、日志 Job 和 byte 范围，锁定包含关系的安全边界
+def test_evidence_reference_rejects_expansion_and_identity_changes() -> None:
+    digest = "a" * 64
+    observed = {
+        f"train.py@sha256:{digest}#L15-L23",
+        "stderr:job-1/attempt-1@bytes:100-200",
+    }
+
+    assert not _reference_was_observed(f"train.py@sha256:{digest}#L14-L23", observed)
+    assert not _reference_was_observed(
+        f"train.py@sha256:{'b' * 64}#L17",
+        observed,
+    )
+    assert not _reference_was_observed(
+        "stderr:job-2/attempt-1@bytes:120-180",
+        observed,
+    )
+    assert not _reference_was_observed(
+        "stderr:job-1/attempt-1@bytes:120-201",
+        observed,
+    )
 
 
 # 从 Anthropic messages 尾部取得最近一次工具结果 JSON
