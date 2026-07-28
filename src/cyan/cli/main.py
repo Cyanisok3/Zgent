@@ -16,7 +16,11 @@ from cyan.core.logging_setup import setup_logging
 
 # CLI 主入口：解析命令行参数并分发到对应子命令
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="cyan", description="cyan CLI")
+    parser = argparse.ArgumentParser(
+        prog="cyan",
+        description="Local ML training Incident Agent",
+        epilog="Run `cyan` in an ML project, then use /monitor to start supervised training.",
+    )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     subparsers = parser.add_subparsers(dest="command", metavar="{watch}")
 
@@ -26,7 +30,10 @@ def main() -> None:
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--goal", required=True, help="Goal for the agent to accomplish")
 
-    watch_parser = subparsers.add_parser("watch", help="Watch a training command")
+    watch_parser = subparsers.add_parser(
+        "watch",
+        help="Compatibility entrypoint for directly launching a training command",
+    )
     watch_parser.add_argument("argv", nargs=argparse.REMAINDER, help="Command after --")
 
     core_parser = subparsers.add_parser("core")

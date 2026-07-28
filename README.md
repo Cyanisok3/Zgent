@@ -11,25 +11,52 @@ AutoResearch。
 ## 快速开始
 
 要求 Python 3.12。
+以下流程假设安装生成的 `cyan` 入口已在 `PATH` 中；仓库开发环境可直接使用
+`/path/to/Zgent/.venv/bin/cyan`。
 
 ```bash
 uv sync
 cp .env.example .env
-uv run cyan watch -- python train.py --config configs/base.yaml
+cd /path/to/your/ml-project
+cyan
 ```
 
-`cyan watch` 会：
+在 TUI 中输入：
 
-1. 在需要时自动启动 `cyan-core`；
-2. 以当前目录作为不可变 `workspace_root` 启动真实 argv；
-3. 打开单滚屏 TUI，持续展示命令、cwd、状态及 stdout/stderr；
-4. 在非零退出或非用户信号后自动创建 Incident；
+```text
+/monitor
+```
+
+普通聊天输入 `/` 会显示本地 TUI 命令和可用 Agent skills；使用上下键选择，按 Enter
+回填。普通 Agent 调用受控工具时，TUI 会显示聚焦的权限选择器，可用上下键和 Enter，
+或直接按 `y/a/n/d` 选择一次允许、始终允许、拒绝或始终拒绝。
+
+粘贴一条训练启动命令并按 Enter。cyan 会确定性解析引号、反斜杠续行和开头的环境变量
+覆盖，展示 cwd、可执行文件、argv、覆盖项和显式配置路径；确认无误后输入：
+
+```text
+/start
+```
+
+随后 cyan 会：
+
+1. 在需要时自动启动 `cyan-core`，普通聊天和训练监视共用当前 TUI；
+2. 以当前目录作为不可变 `workspace_root`，由 harness 启动真实 argv；
+3. 持续展示命令、cwd、状态及 stdout/stderr；
+4. 在非零退出或非用户信号后自动创建只读 Incident Agent；
 5. 展示结构化根因、稳定证据引用和完整 proposed diff；
-6. 经批准后应用补丁，并可先运行用户声明的 smoke verifier；
+6. 经 `/approve` 批准后应用补丁，并可先运行用户声明的 smoke verifier；
 7. 用原 argv、cwd 和环境重跑；只有真实退出码为 0 才标记 `resolved`。
 
-之后直接运行 `uv run cyan` 会恢复最近一个运行中或待处理任务；存在多个任务时才出现
-选择器。`Ctrl+Q` 只分离 TUI，不会停止训练任务或关闭 Incident session。
+重新运行 `cyan` 会新建普通聊天，并恢复最近一个运行中或待处理 Job/Incident；
+存在多个任务时才出现选择器。`Ctrl+Q` 只分离 TUI，不会停止训练任务或关闭 Incident
+session。`cyan watch -- python train.py ...` 仍作为兼容入口保留。
+输入 `/monitor` 会跳过历史终态 Job/Incident；只有当前附着的训练进程仍处于
+`starting/running` 时才要求先使用 `/cancel-job`。
+
+训练命令不会交给 Agent 解释，也不会通过 shell 执行。管道、重定向、后台执行和命令
+替换会被拒绝；复杂启动逻辑应先写入脚本，再粘贴 `bash scripts/train_local.sh`。v1 不会
+侦测用户在另一个终端自行启动的进程。
 
 ## 可选 smoke verifier
 
@@ -44,9 +71,9 @@ timeout_s = 300
 
 有此配置时，TUI 会同时提供：
 
-- `A`：批准补丁，先 smoke，再运行完整原命令；
-- `R`：批准补丁，跳过 smoke，直接运行完整原命令；
-- `X`：拒绝补丁。
+- `/approve`：批准补丁，先 smoke，再运行完整原命令；
+- `/approve-no-smoke`：批准补丁，跳过 smoke，直接运行完整原命令；
+- `/reject`：拒绝补丁。
 
 smoke 与原任务使用同一个 workspace 和环境，但不是安全沙盒。它只按退出码判定：
 `0` 表示通过。smoke 失败时，cyan 只会在补丁目标仍保持 apply 后哈希时自动反向应用，

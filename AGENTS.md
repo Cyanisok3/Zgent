@@ -35,11 +35,16 @@ cyan is a local ML-training Incident Agent, not an AutoResearch system.
 The product surface is the TUI. Normal users need only:
 
 ```bash
-cyan watch -- python train.py --config configs/base.yaml
 cyan
+# Then use /monitor, paste one training command, review the preview, and use /start.
 ```
 
-The remaining CLI commands are development diagnostics and must not complicate the primary help.
+`cyan watch -- <argv>` remains a compatibility entrypoint. The remaining CLI commands are
+development diagnostics and must not complicate the primary help. `/monitor` is client-local:
+the harness parses and previews the command without an Agent or shell, then reuses `job.start`.
+Typing `/` must show keyboard-selectable local commands and ordinary chat skills. Ordinary chat
+permission requests use the existing `permission.*` events and `permission.respond`; this must not
+broaden the read-only Incident profile.
 
 ## Architecture
 

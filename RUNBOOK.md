@@ -3,14 +3,22 @@
 ## 用户入口
 
 ```bash
-# 从项目根目录启动真实训练任务并进入 TUI
-uv run cyan watch -- python train.py --config configs/base.yaml
-
-# 重新附着最近的运行中或待处理任务
-uv run cyan
+# 从模型项目根目录启动 daemon 和项目级 TUI
+cyan
 ```
 
-`Ctrl+Q` 只 detach。只有 TUI 中显式按 `C` 才请求取消当前进程组。
+在 TUI 中输入 `/monitor`，粘贴训练命令，检查确定性预览后输入 `/start`。`Ctrl+Q`
+只 detach；只有显式 `/cancel-job` 才请求取消当前进程组。`cyan watch -- <argv>` 仍是
+兼容入口。
+
+Incident 追问使用 `/incident <文本>`；补丁操作使用 `/approve`、
+`/approve-no-smoke` 和 `/reject`。普通文本始终进入本次 TUI 新建的普通聊天，不会被
+解释为 Incident 决策。
+
+输入 `/` 会打开本地命令与 Agent skills 补全，使用上下键和 Enter 选择。普通 Agent
+触发 `permission.requested` 时，TUI 会聚焦权限选择器并通过 `permission.respond`
+返回选择；Incident Agent 的只读工具边界不受影响。历史终态 Job/Incident 不阻止新的
+`/monitor`，真实运行中的训练仍需先 `/cancel-job`。
 
 ## daemon
 

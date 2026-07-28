@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from cyan.tui.app import (
+    ChatTextArea,
     CyanTuiApp,
+    PermissionSelect,
+    SlashCompleteWidget,
     _actionable_jobs,
     _approval_hint,
     _diagnosis_body,
@@ -49,8 +54,8 @@ def test_approval_hint_only_shows_smoke_when_configured() -> None:
     assert "smoke" in hint.lower()
     assert "$ python smoke.py --quick" in hint
     assert "timeout=45.0s" in hint
-    assert "without smoke" in hint.lower()
-    assert "reject" in hint.lower()
+    assert "/approve-no-smoke" in hint
+    assert "/reject" in hint
 
 
 # 功能：验证 TUI 的 attempt 时长与诊断正文保留演示所需的真实信息
@@ -78,9 +83,8 @@ def test_approval_hint_disables_apply_for_non_git_workspace() -> None:
     hint = _approval_hint({"argv": ["python", "smoke.py"]}, can_apply=False)
 
     assert "review-only" in hint
-    assert "[X]" in hint
-    assert "[A]" not in hint
-    assert "[R]" not in hint
+    assert "/reject" in hint
+    assert "/approve" not in hint
 
 
 # 功能：验证日志读取兼容 RPC 的 data 字段并推进稳定字节 offset
@@ -91,6 +95,24 @@ def test_log_result_reads_rpc_shape() -> None:
         17,
         True,
     )
+
+
+# 功能：验证统一多行输入框能在真实 Textual 生命周期中挂载并获得焦点
+# 设计：用永不完成的无副作用连接协程替换网络 worker，只检查实际 DOM 组合
+async def test_unified_prompt_mounts_in_textual_app(tmp_path: Path) -> None:
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+
+    # 保持挂载 worker 存活但不访问网络
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt = app.query_one("#prompt", ChatTextArea)
+        assert prompt.has_focus
+        assert prompt.border_title == "Message or /command"
 
 
 # 功能：验证 Ctrl+Q 仅退出客户端且不会发送 job.cancel
@@ -143,7 +165,16 @@ async def test_active_incident_run_is_subscribed_once() -> None:
         (
             "event.subscribe",
             {
-                "topics": ["run.*", "tool.*", "llm.*"],
+                "topics": [
+                    "run.*",
+                    "step.*",
+                    "tool.*",
+                    "llm.*",
+                    "permission.*",
+                    "context.*",
+                    "skill.*",
+                    "log.*",
+                ],
                 "scope": "run:run-auto",
                 "replay_from_run": "run-auto",
             },
@@ -170,8 +201,9 @@ async def test_followup_and_snapshot_share_one_run_subscription() -> None:
     app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1")
     client = _FakeClient()
     app._client = client  # type: ignore[assignment]
-    app._session_id = "session-1"
+    app._incident_session_id = "session-1"
     app._snapshot = {"incident": {"active_run_id": "run-race"}}
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
 
     await asyncio.gather(
         app._subscribe_active_run(),
@@ -187,7 +219,16 @@ async def test_followup_and_snapshot_share_one_run_subscription() -> None:
         (
             "event.subscribe",
             {
-                "topics": ["run.*", "tool.*", "llm.*"],
+                "topics": [
+                    "run.*",
+                    "step.*",
+                    "tool.*",
+                    "llm.*",
+                    "permission.*",
+                    "context.*",
+                    "skill.*",
+                    "log.*",
+                ],
                 "scope": "run:run-race",
                 "replay_from_run": "run-race",
             },
@@ -251,9 +292,11 @@ async def test_job_event_cursor_deduplicates_and_resets_on_switch() -> None:
 async def test_agent_replay_events_are_rendered_once() -> None:
     app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1")
     rendered: list[str] = []
+    appended: list[Any] = []
     app._append_text = (  # type: ignore[method-assign]
         lambda content, style="": rendered.append(content)
     )
+    app._append = lambda widget: appended.append(widget)  # type: ignore[method-assign]
     tool_event = {
         "type": "tool.call_started",
         "run_id": "run-1",
@@ -273,7 +316,44 @@ async def test_agent_replay_events_are_rendered_once() -> None:
     await app._handle_event(run_event)
     await app._handle_event(run_event)
 
-    assert rendered == ["tool: read_job_log", "Agent run: success"]
+    assert len(appended) == 1
+    assert rendered == ["Agent run: success  steps=0"]
+
+
+# 功能：验证普通聊天与 Incident 并发流式输出不会写入同一个文本块
+# 设计：交错投递两个 run 的 token，并检查各自累积文本保持隔离
+async def test_concurrent_agent_streams_use_separate_blocks() -> None:
+    app = CyanTuiApp("127.0.0.1", 7437)
+    appended: list[Any] = []
+    app._append = lambda widget: appended.append(widget)  # type: ignore[method-assign]
+
+    await app._handle_event({"type": "llm.token", "run_id": "chat", "token": "A"})
+    await app._handle_event({"type": "llm.token", "run_id": "incident", "token": "X"})
+    await app._handle_event({"type": "llm.token", "run_id": "chat", "token": "B"})
+
+    assert len(appended) == 2
+    assert app._agent_texts == {"chat": "AB", "incident": "X"}
+
+
+# 功能：验证当前普通聊天 run 结束后统一输入框立即恢复可用
+# 设计：直接投递匹配 run.finished，锁定无需全局 session 事件订阅的最小状态流
+async def test_chat_run_finished_releases_prompt() -> None:
+    app = CyanTuiApp("127.0.0.1", 7437)
+    app._chat_run_id = "run-chat"
+    app._chat_busy = True
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+    app._update_prompt = lambda: None  # type: ignore[method-assign]
+
+    await app._handle_event(
+        {
+            "type": "run.finished",
+            "run_id": "run-chat",
+            "status": "success",
+        }
+    )
+
+    assert not app._chat_busy
+    assert app._chat_run_id is None
 
 
 # 功能：验证 can_apply=false 时快捷键路径也无法绕过非 Git 审批限制
@@ -353,3 +433,242 @@ async def test_smoke_approval_sends_displayed_config_fingerprint() -> None:
             },
         )
     ]
+
+
+# 功能：验证统一输入框中的单独 A 只会发送普通聊天，不会触发 Incident 审批
+# 设计：同时预置有效提案和聊天会话，以命令记录锁定历史焦点冲突不会复发
+async def test_plain_a_routes_to_chat_instead_of_incident_decision() -> None:
+    class _FakeClient:
+        # 初始化命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 为聊天发送返回 run_id，并接受随后产生的事件订阅
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            if method == "session.send_message":
+                return {"run_id": "run-chat"}
+            return {"subscription_id": "sub-chat"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1")
+    client = _FakeClient()
+    app._client = client  # type: ignore[assignment]
+    app._chat_session_id = "chat-1"
+    app._incident_id = "incident-1"
+    app._proposal_id = "proposal-1"
+    app._awaiting_approval = True
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+    app._update_prompt = lambda: None  # type: ignore[method-assign]
+
+    await app._handle_submission("A")
+
+    assert client.commands[0] == (
+        "session.send_message",
+        {"session_id": "chat-1", "content": "A"},
+    )
+    assert all(method != "incident.decide" for method, _params in client.commands)
+    assert app._awaiting_approval
+
+
+# 功能：验证只有显式 /approve 才会提交当前 Incident 提案
+# 设计：绕过 Textual 事件层调用统一路由，断言审批参数仍绑定当前提案
+async def test_explicit_approve_command_decides_incident() -> None:
+    class _FakeClient:
+        # 初始化命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 记录 Incident 决策
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            return {"status": "retry_running"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1")
+    client = _FakeClient()
+    app._client = client  # type: ignore[assignment]
+    app._incident_id = "incident-1"
+    app._proposal_id = "proposal-1"
+    app._awaiting_approval = True
+    app._can_apply = True
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+
+    await app._handle_submission("/approve")
+
+    assert client.commands == [
+        (
+            "incident.decide",
+            {
+                "incident_id": "incident-1",
+                "proposal_id": "proposal-1",
+                "decision": "approve",
+                "run_smoke": False,
+            },
+        )
+    ]
+
+
+# 功能：验证 /monitor 预览确认后复用现有 job.start 且只展示环境覆盖项
+# 设计：用真实解释器解析并以假 RPC 检查 argv、cwd、合并环境和新 Job 附着状态
+async def test_monitor_preview_and_start_use_existing_job_rpc(tmp_path: Path) -> None:
+    class _FakeClient:
+        # 初始化命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 为 job.start 返回固定 Job，并接受 Job 事件订阅
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            if method == "job.start":
+                return {"job_id": "job-new"}
+            return {"subscription_id": "sub-job"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+    client = _FakeClient()
+    rendered: list[str] = []
+    app._client = client  # type: ignore[assignment]
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered.append(content)
+    )
+    app._update_prompt = lambda: None  # type: ignore[method-assign]
+
+    await app._handle_submission("/monitor")
+    await app._handle_submission(f"CYAN_TEST_MODE=quick {sys.executable} train.py")
+    await app._handle_submission("/start")
+
+    start_method, start_params = client.commands[0]
+    assert start_method == "job.start"
+    assert start_params["argv"] == [sys.executable, "train.py"]
+    assert start_params["workspace_root"] == str(tmp_path)
+    assert start_params["env"]["CYAN_TEST_MODE"] == "quick"
+    preview = next(text for text in rendered if text.startswith("Training launch preview"))
+    assert "CYAN_TEST_MODE=quick" in preview
+    assert "PATH=" not in preview
+    assert app._job_id == "job-new"
+
+
+# 功能：验证 /monitor 会跳过历史任务选择器和 unresolved Incident，而不是形成死路
+# 设计：在真实 Textual DOM 中模拟选择器等待状态，断言本地模式切换并解除等待
+async def test_monitor_skips_historical_job_selection(tmp_path: Path) -> None:
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-old", workspace_root=tmp_path)
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+
+    async with app.run_test() as pilot:
+        app._selection_in_progress = True
+        app._snapshot = {
+            "job": {"id": "job-old", "status": "failed"},
+            "incident": {"status": "unresolved"},
+        }
+
+        await app._handle_submission("/monitor")
+        await pilot.pause()
+
+        assert app._input_mode == "monitor"
+        assert app._skip_job_restore
+        assert not app._selection_in_progress
+        assert app._selection_ready.is_set()
+
+
+# 功能：验证真实运行中的训练仍会阻止同一 TUI 启动第二个前台 Job
+# 设计：预置 running 快照并直接调用本地命令，检查模式不变和精确提示
+async def test_monitor_still_blocks_running_training() -> None:
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-running")
+    rendered: list[str] = []
+    app._snapshot = {"job": {"id": "job-running", "status": "running"}}
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered.append(content)
+    )
+
+    await app._handle_submission("/monitor")
+
+    assert app._input_mode == "chat"
+    assert rendered == [
+        "The attached training process is still running. "
+        "Use /cancel-job before starting another."
+    ]
+
+
+# 功能：验证输入斜杠会显示补全窗口，并可用方向键和 Enter 选择命令
+# 设计：在真实 Textual 生命周期中固定两个候选，模拟键盘操作并检查回填文本
+async def test_slash_popup_supports_keyboard_completion(tmp_path: Path) -> None:
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+
+    # 返回稳定候选，隔离本机 skills
+    def _fixed_slash_items() -> list[tuple[str, str]]:
+        return [("monitor", "monitor training"), ("help", "show help")]
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._build_slash_items = _fixed_slash_items  # type: ignore[method-assign]
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+
+    async with app.run_test() as pilot:
+        await pilot.press("/")
+        await pilot.pause()
+        assert app.query_one(SlashCompleteWidget).has_selection()
+
+        await pilot.press("down", "enter")
+        await pilot.pause()
+
+        assert app.query_one("#prompt", ChatTextArea).text == "/help "
+        assert not list(app.query(SlashCompleteWidget))
+
+
+# 功能：验证 permission.requested 会显示焦点控件并通过 IPC 返回用户选择
+# 设计：在真实 Textual DOM 中投递事件和按键，断言 permission.respond 的完整参数
+async def test_permission_request_roundtrips_through_focused_control(
+    tmp_path: Path,
+) -> None:
+    class _FakeClient:
+        # 初始化命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 记录权限响应
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            return {"ok": True}
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+    client = _FakeClient()
+
+    async with app.run_test() as pilot:
+        app._client = client  # type: ignore[assignment]
+        app._chat_busy = True
+        app._update_prompt()
+        await app._handle_event(
+            {
+                "type": "permission.requested",
+                "run_id": "run-chat",
+                "session_id": "chat-1",
+                "tool_use_id": "tool-1",
+                "tool_name": "write_file",
+                "param_preview": "path='model.py'",
+            }
+        )
+        await pilot.pause()
+
+        assert app.query_one(PermissionSelect).has_focus
+        await pilot.press("y")
+        await pilot.pause()
+
+        assert client.commands == [
+            (
+                "permission.respond",
+                {"tool_use_id": "tool-1", "decision": "allow_once"},
+            )
+        ]
+        assert not app._pending_permission_blocks
+        assert not app._permission_selects
