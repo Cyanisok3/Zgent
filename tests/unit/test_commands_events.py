@@ -38,9 +38,17 @@ def test_ping_command_missing_client_raises() -> None:
 # 功能：验证 PongResult 序列化往返后所有字段完整保留
 # 设计：与 PingCommand 对称，测试命令-响应对的两端序列化，确认 int 和 str 字段类型在往返中不变
 def test_pong_result_roundtrip() -> None:
-    pong = PongResult(server_version="0.0.1", uptime_ms=42, received_at="2026-05-11T00:00:00Z")
+    pong = PongResult(
+        server_version="0.0.1",
+        protocol_version=1,
+        startup_workspace_root="/tmp/project",
+        uptime_ms=42,
+        received_at="2026-05-11T00:00:00Z",
+    )
     pong2 = PongResult.model_validate(pong.model_dump())
     assert pong2.server_version == "0.0.1"
+    assert pong2.protocol_version == 1
+    assert pong2.startup_workspace_root == "/tmp/project"
     assert pong2.uptime_ms == 42
 
 

@@ -44,6 +44,14 @@ cyan 会先展示 cwd、可执行文件、最终 argv、环境覆盖项和识别
 
 `Ctrl+Q` 只分离 TUI，不停止训练。`cyan watch -- <argv>` 是兼容入口。
 
+## VS Code Alpha
+
+`vscode/` 提供薄型本地 VSIX。训练、Incident、补丁和重跑仍全部由 Python daemon 负责；
+插件只提供命令预览、底部只读训练日志、diagnosis/evidence、原生 diff 和上下文操作。
+
+当前只支持 macOS/Linux、单个可信本地目录，并要求已安装 `cyan`。构建和安装说明见
+[vscode/README.md](vscode/README.md)。TUI 仍是默认入口，VSIX 尚不面向 Marketplace 分发。
+
 ## 启动边界
 
 训练命令由本地 harness 解析，不交给 Agent，也不经 shell 执行。支持引号、反斜杠续行和
@@ -100,7 +108,7 @@ smoke 由用户声明，不由 Agent 生成或修改。smoke 失败时，cyan �
 ## 架构
 
 ```text
-cyan / cyan-tui
+cyan / cyan-tui / cyan VS Code
     │ TCP loopback + NDJSON + JSON-RPC 2.0
 cyan-core
     ├── JobSupervisor ── real process groups
@@ -138,6 +146,7 @@ uv run pytest tests/unit -v
 uv run pytest tests/integration -v
 uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
+cd vscode && npm run lint && npm run test:unit && npm run package
 ```
 
 协议见 [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md)，运维说明见 [RUNBOOK.md](RUNBOOK.md)，开发约束

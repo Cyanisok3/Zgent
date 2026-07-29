@@ -13,7 +13,9 @@ build/
 .vscode/
 uv.lock
 .idea/
+node_modules/
 .DS_Store
 *.log
+*.vsix
 workspace/
 /user-tests/FastestDet-cyan/

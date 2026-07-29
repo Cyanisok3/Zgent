@@ -170,9 +170,45 @@ def test_sensitive_rpc_command_trace_redacts_content_and_env_values() -> None:
             "job.start",
             {"argv": ["python"], "env": {"API_TOKEN": secret}},
         ),
+        _trace_params(
+            "launch.preview",
+            {"command": secret, "env": {"API_TOKEN": secret}},
+        ),
+        _trace_params(
+            "launch.start",
+            {
+                "command": secret,
+                "env": {"API_TOKEN": secret},
+                "preview_fingerprint": "a" * 64,
+            },
+        ),
     ]
 
     assert secret not in json.dumps(traced, ensure_ascii=False)
     assert traced[0]["goal_chars"] == len(secret)
     assert traced[1]["content_bytes"] == len(secret.encode())
     assert traced[2]["env"] == {"forwarded_keys": ["API_TOKEN"]}
+    assert traced[3]["command_chars"] == len(secret)
+    assert traced[3]["env"] == {"forwarded_keys": ["API_TOKEN"]}
+    assert traced[4]["command_bytes"] == len(secret.encode())
+
+
+# 功能：验证 incident.review 响应 trace 不复制审阅前后的源码
+# 设计：使用唯一敏感标记构造成功响应并检查仅保留路径与体积摘要
+def test_incident_review_trace_redacts_source_text() -> None:
+    secret = "PRIVATE-SOURCE-TEXT"
+    response = JsonRpcSuccess(
+        id="review-1",
+        result={
+            "proposal_id": "proposal-1",
+            "path": "train.py",
+            "before_text": secret,
+            "after_text": f"{secret}-updated",
+        },
+    )
+
+    traced = _trace_response("incident.review", response)
+
+    assert secret not in json.dumps(traced)
+    assert traced["result"]["proposal_id"] == "proposal-1"
+    assert traced["result"]["before_chars"] == len(secret)

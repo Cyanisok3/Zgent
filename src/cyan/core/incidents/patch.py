@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import hashlib
+import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -21,6 +22,10 @@ from cyan.core.incidents.models import (
 _PROTECTED_CONFIGS = frozenset({".cyan/config.toml"})
 _BINARY_MARKERS = ("GIT binary patch", "Binary files ")
 _UNSAFE_GIT_MODES = ("120000", "160000")
+_HUNK_HEADER = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
+    r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
+)
 
 
 class PatchError(ValueError):
@@ -119,6 +124,75 @@ def build_replacement_diff(path: str, original: str, updated: str) -> str:
     if not patch:
         raise PatchError("replacement produced an empty diff")
     return patch
+
+
+# 按 no-newline 标记还原一条 unified diff 内容行
+def _diff_payload(lines: list[str], index: int) -> tuple[str, int]:
+    payload = lines[index][1:]
+    next_index = index + 1
+    if (
+        next_index < len(lines)
+        and lines[next_index].startswith("\\ No newline at end of file")
+    ):
+        if payload.endswith("\r\n"):
+            payload = payload[:-2]
+        elif payload.endswith(("\n", "\r")):
+            payload = payload[:-1]
+        next_index += 1
+    return payload, next_index
+
+
+# 在内存中把受限单文件 unified diff 应用于真实原文
+def apply_unified_diff_to_text(original: str, patch: str) -> str:
+    parsed = parse_unified_diff(patch)
+    if len(parsed) != 1 or parsed[0].change_type != "modify":
+        raise PatchError("review supports one modified file")
+    source = original.splitlines(keepends=True)
+    output: list[str] = []
+    cursor = 0
+    lines = patch.splitlines(keepends=True)
+    index = 0
+    saw_hunk = False
+    while index < len(lines):
+        match = _HUNK_HEADER.match(lines[index])
+        if match is None:
+            index += 1
+            continue
+        saw_hunk = True
+        old_start = int(match.group("old_start"))
+        old_count = int(match.group("old_count") or "1")
+        new_count = int(match.group("new_count") or "1")
+        target = max(old_start - 1, 0)
+        if target < cursor or target > len(source):
+            raise PatchError("patch hunk range is invalid")
+        output.extend(source[cursor:target])
+        cursor = target
+        consumed = 0
+        produced = 0
+        index += 1
+        while index < len(lines) and _HUNK_HEADER.match(lines[index]) is None:
+            line = lines[index]
+            if line.startswith(("--- ", "+++ ")):
+                break
+            if not line or line[0] not in " +-":
+                index += 1
+                continue
+            operation = line[0]
+            payload, index = _diff_payload(lines, index)
+            if operation in " -":
+                if cursor >= len(source) or source[cursor] != payload:
+                    raise PatchError("patch context does not match current file")
+                cursor += 1
+                consumed += 1
+            if operation in " +":
+                output.append(payload)
+                produced += 1
+        if consumed != old_count or produced != new_count:
+            raise PatchError("patch hunk counts are inconsistent")
+    if not saw_hunk:
+        raise PatchError("patch contains no hunks")
+    output.extend(source[cursor:])
+    return "".join(output)
 
 
 # 规范化 unified diff 文件头路径并拒绝危险路径
@@ -325,6 +399,23 @@ class PatchService:
             files=files,
             applied_at=datetime.now(UTC),
         )
+
+    # 校验当前单文件 proposal 并在内存中生成审阅前后文本
+    def review(self, proposal: Proposal, patch_path: Path) -> tuple[str, str]:
+        self._verify_base_state(proposal, patch_path)
+        if len(proposal.files) != 1 or proposal.files[0].change_type != "modify":
+            raise PatchError("review supports one modified file")
+        target = resolve_workspace_path(self._workspace_root, proposal.files[0].path)
+        content = target.read_bytes()
+        if len(content) > 1024 * 1024:
+            raise PatchError("review target exceeds 1 MiB")
+        try:
+            original = content.decode("utf-8")
+            patch = patch_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise PatchError("review requires UTF-8 text") from exc
+        updated = apply_unified_diff_to_text(original, patch)
+        return original, updated
 
     # 只读校验 proposal 当前可应用，不修改工作区
     async def check(self, proposal: Proposal, patch_path: Path) -> None:

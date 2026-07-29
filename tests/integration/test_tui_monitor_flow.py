@@ -8,9 +8,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from cyan.core.jobs.launch import parse_training_command
 from cyan.core.transport.socket_client import SocketClient
 from cyan.tui.app import ChatTextArea, CyanTuiApp
-from cyan.tui.launch import parse_training_command
 
 
 # 功能：验证 TUI 预览确认通过真实 RPC 启动子进程并保持 launch.json 私有

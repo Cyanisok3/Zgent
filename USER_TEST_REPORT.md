@@ -96,7 +96,22 @@ FastestDet 性能数据来自约 3.6 秒的极短 fixture，其中约 2 秒为�
 Ruff: passed
 mypy: passed
 WIRE_PROTOCOL.md: up to date
-unit: 412 passed
-integration: 16 passed
-pytest: 428 passed in 39.19s
+unit: 425 passed
+integration: 18 passed
+pytest: 443 passed in 40.44s
 ```
+
+## VS Code Alpha 验收
+
+2026-07-29 增加的薄型 VS Code 客户端未修改 Incident Agent、进程监督或补丁应用策略，
+因此没有重跑上述 9-case LLM Pilot。新增验收覆盖：
+
+- TypeScript 编译与 7 个纯 UI、cursor、Trust 和上下文动作测试；
+- 真实 VS Code Extension Host 启动、daemon 连接、命令注册和 snapshot refresh；
+- 真实 daemon、真实训练子进程的 `launch.preview → launch.start → job.read_log`；
+- VSIX 成功打包；关闭扩展只断开客户端；
+- 5 组交替运行中，无日志读者中位 0.8126 秒，300 ms cursor 轮询中位 0.8076 秒，
+  观测差值 -0.61%，未发现可测的训练开销。
+
+性能数字来自 0.75 秒 sleep fixture，只用于排除轮询造成的明显固定开销，不外推到真实模型
+吞吐或 GPU 利用率。

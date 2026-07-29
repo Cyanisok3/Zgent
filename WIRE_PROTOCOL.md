@@ -184,6 +184,47 @@
 }
 ```
 
+### IncidentReviewCommand
+
+| Field | Type | Required |
+|---|---|---|
+| `type` | `string` | no |
+| `job_id` | `string` | yes |
+| `incident_id` | `string` | yes |
+| `proposal_id` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "type": {
+      "const": "incident.review",
+      "default": "incident.review",
+      "title": "Type",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "incident_id": {
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "proposal_id": {
+      "title": "Proposal Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "incident_id",
+    "proposal_id"
+  ],
+  "title": "IncidentReviewCommand",
+  "type": "object"
+}
+```
+
 ### JobCancelCommand
 
 | Field | Type | Required |
@@ -365,6 +406,103 @@
     "workspace_root"
   ],
   "title": "JobStartCommand",
+  "type": "object"
+}
+```
+
+### LaunchPreviewCommand
+
+| Field | Type | Required |
+|---|---|---|
+| `type` | `string` | no |
+| `command` | `string` | yes |
+| `workspace_root` | `string` | yes |
+| `env` | `object` | no |
+
+```json
+{
+  "properties": {
+    "type": {
+      "const": "launch.preview",
+      "default": "launch.preview",
+      "title": "Type",
+      "type": "string"
+    },
+    "command": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Command",
+      "type": "string"
+    },
+    "workspace_root": {
+      "title": "Workspace Root",
+      "type": "string"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env",
+      "type": "object"
+    }
+  },
+  "required": [
+    "command",
+    "workspace_root"
+  ],
+  "title": "LaunchPreviewCommand",
+  "type": "object"
+}
+```
+
+### LaunchStartCommand
+
+| Field | Type | Required |
+|---|---|---|
+| `type` | `string` | no |
+| `command` | `string` | yes |
+| `workspace_root` | `string` | yes |
+| `env` | `object` | no |
+| `preview_fingerprint` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "type": {
+      "const": "launch.start",
+      "default": "launch.start",
+      "title": "Type",
+      "type": "string"
+    },
+    "command": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Command",
+      "type": "string"
+    },
+    "workspace_root": {
+      "title": "Workspace Root",
+      "type": "string"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env",
+      "type": "object"
+    },
+    "preview_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Preview Fingerprint",
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "workspace_root",
+    "preview_fingerprint"
+  ],
+  "title": "LaunchStartCommand",
   "type": "object"
 }
 ```
@@ -700,6 +838,46 @@
 }
 ```
 
+### IncidentReviewResult
+
+| Field | Type | Required |
+|---|---|---|
+| `proposal_id` | `string` | yes |
+| `path` | `string` | yes |
+| `before_text` | `string` | yes |
+| `after_text` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "proposal_id": {
+      "title": "Proposal Id",
+      "type": "string"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "before_text": {
+      "title": "Before Text",
+      "type": "string"
+    },
+    "after_text": {
+      "title": "After Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "proposal_id",
+    "path",
+    "before_text",
+    "after_text"
+  ],
+  "title": "IncidentReviewResult",
+  "type": "object"
+}
+```
+
 ### JobCancelResult
 
 | Field | Type | Required |
@@ -978,6 +1156,90 @@
 }
 ```
 
+### LaunchPreviewResult
+
+| Field | Type | Required |
+|---|---|---|
+| `argv` | `array` | yes |
+| `cwd` | `string` | yes |
+| `env_overrides` | `object` | yes |
+| `executable` | `string` | yes |
+| `config_paths` | `array` | yes |
+| `fingerprint` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "argv": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Argv",
+      "type": "array"
+    },
+    "cwd": {
+      "title": "Cwd",
+      "type": "string"
+    },
+    "env_overrides": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env Overrides",
+      "type": "object"
+    },
+    "executable": {
+      "title": "Executable",
+      "type": "string"
+    },
+    "config_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Config Paths",
+      "type": "array"
+    },
+    "fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fingerprint",
+      "type": "string"
+    }
+  },
+  "required": [
+    "argv",
+    "cwd",
+    "env_overrides",
+    "executable",
+    "config_paths",
+    "fingerprint"
+  ],
+  "title": "LaunchPreviewResult",
+  "type": "object"
+}
+```
+
+### LaunchStartResult
+
+| Field | Type | Required |
+|---|---|---|
+| `job_id` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id"
+  ],
+  "title": "LaunchStartResult",
+  "type": "object"
+}
+```
+
 ### PermissionRespondResult
 
 | Field | Type | Required |
@@ -1003,6 +1265,8 @@
 | Field | Type | Required |
 |---|---|---|
 | `server_version` | `string` | yes |
+| `protocol_version` | `integer` | yes |
+| `startup_workspace_root` | `string` | yes |
 | `uptime_ms` | `integer` | yes |
 | `received_at` | `string` | yes |
 
@@ -1011,6 +1275,14 @@
   "properties": {
     "server_version": {
       "title": "Server Version",
+      "type": "string"
+    },
+    "protocol_version": {
+      "title": "Protocol Version",
+      "type": "integer"
+    },
+    "startup_workspace_root": {
+      "title": "Startup Workspace Root",
       "type": "string"
     },
     "uptime_ms": {
@@ -1024,6 +1296,8 @@
   },
   "required": [
     "server_version",
+    "protocol_version",
+    "startup_workspace_root",
     "uptime_ms",
     "received_at"
   ],

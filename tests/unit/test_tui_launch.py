@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from cyan.tui.launch import (
+from cyan.core.jobs.launch import (
     LaunchParseError,
     format_launch_preview,
+    launch_fingerprint,
     parse_training_command,
 )
 
@@ -99,3 +100,29 @@ def test_parse_training_command_rejects_missing_executable(tmp_path: Path) -> No
             tmp_path,
             {"PATH": ""},
         )
+
+
+# 功能：验证相对可执行文件以训练工作区而非 daemon 当前目录为基准解析
+# 设计：创建真实可执行脚本并从不同进程目录调用纯解析器
+def test_parse_training_command_resolves_workspace_executable(tmp_path: Path) -> None:
+    executable = tmp_path / "train"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    launch = parse_training_command("./train --steps 1", tmp_path, {"PATH": ""})
+
+    assert launch.executable == str(executable.resolve())
+
+
+# 功能：验证 LaunchSpec 指纹覆盖完整环境但预览仍不暴露继承环境
+# 设计：只改变一个继承变量并比较稳定哈希，锁定确认与启动一致性
+def test_launch_fingerprint_detects_environment_change(tmp_path: Path) -> None:
+    first_env = {"PATH": os.environ["PATH"], "PRIVATE_TOKEN": "first"}
+    second_env = {"PATH": os.environ["PATH"], "PRIVATE_TOKEN": "second"}
+    launch = parse_training_command(f"{sys.executable} train.py", tmp_path, first_env)
+
+    first = launch_fingerprint(launch, tmp_path, first_env)
+    second = launch_fingerprint(launch, tmp_path, second_env)
+
+    assert first != second
+    assert "PRIVATE_TOKEN" not in format_launch_preview(launch, tmp_path)

@@ -36,7 +36,7 @@ cyan is a local ML-training Incident Agent, not an AutoResearch system.
 - A user-declared smoke verifier is optional; the original command is always the final verifier.
 - v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
 
-The product surface is the TUI. Normal users need only:
+The default product surface is the TUI. Normal users need only:
 
 ```bash
 cyan
@@ -52,12 +52,19 @@ broaden the read-only Incident profile. Patch approval, rejection, and running-j
 contextual TUI selectors, not slash commands or global single-key bindings. Multiple recoverable
 Jobs must not block the chat prompt; `/jobs` opens their selector explicitly.
 
+`vscode/` is an optional thin local client. It may provide native Quick Input, Tree View,
+Pseudoterminal, Markdown, and `vscode.diff` surfaces, but it must not reimplement launch parsing,
+Incident state, patch application, or retries in TypeScript. It stores only the attached Job ID;
+daemon snapshots remain authoritative. The Alpha supports one trusted local macOS/Linux workspace
+and an installed `cyan`; do not add bundled runtimes, downloads, Webviews, chat, remote workspaces,
+or Marketplace concerns without a separate product decision.
+
 ## Architecture
 
 cyan is a dual-process local system:
 
 ```text
-cyan / cyan-tui
+cyan / cyan-tui / cyan VS Code
     │ TCP loopback, NDJSON framing, JSON-RPC 2.0 commands
 cyan-core
     ├── JobSupervisor
@@ -160,6 +167,11 @@ uv run pytest tests/unit -v
 uv run pytest tests/integration -v
 uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
+cd vscode
+npm run lint
+npm run test:unit
+npm run test:extension
+npm run package
 ```
 
 ## Code style
@@ -182,3 +194,6 @@ async def test_publish_reaches_subscriber() -> None:
 ```
 
 Do not add multi-line function docstrings in place of these comments.
+
+TypeScript functions and class methods follow the same concise Chinese-comment rule. TypeScript
+tests use two Chinese comment lines immediately above each `test(...)`.

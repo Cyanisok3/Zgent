@@ -9,6 +9,7 @@ import pytest
 from cyan.core.incidents.patch import (
     PatchError,
     PatchService,
+    apply_unified_diff_to_text,
     build_replacement_diff,
 )
 from cyan.core.incidents.store import IncidentStore
@@ -102,6 +103,26 @@ def test_build_replacement_diff_is_git_applicable(
     assert target.read_bytes() == updated
 
 
+@pytest.mark.parametrize(
+    ("original", "updated"),
+    [
+        ("old\n", "new\n"),
+        ("first\nold\nlast\n", "first\nnew\nlast\n"),
+        ("old", "new"),
+        ("old\r\nnext\r\n", "new\r\nnext\r\n"),
+    ],
+)
+# 功能：验证审阅渲染在内存中准确还原单文件替换结果
+# 设计：复用本地 diff 构造并覆盖换行边界，不触碰工作区文件
+def test_apply_unified_diff_to_text(
+    original: str,
+    updated: str,
+) -> None:
+    patch = build_replacement_diff("train.py", original, updated)
+
+    assert apply_unified_diff_to_text(original, patch) == updated
+
+
 # 功能：验证 PatchService 经 git apply --check 应用并可按 receipt 安全反向恢复
 # 设计：使用真实 Git 工作树贯穿 proposal、apply、reverse，避免 mock 掩盖 Git patch 语义
 async def test_patch_service_apply_and_safe_reverse(tmp_path: Path) -> None:
@@ -114,6 +135,24 @@ async def test_patch_service_apply_and_safe_reverse(tmp_path: Path) -> None:
     assert (workspace / "train.py").read_text(encoding="utf-8") == "new\n"
     await service.reverse(proposal, store.patch_path(proposal), receipt)
     assert (workspace / "train.py").read_text(encoding="utf-8") == "old\n"
+
+
+# 功能：验证 PatchService.review 返回准确前后文本且不写工作区
+# 设计：使用真实 proposal artifact 调用同步审阅边界并比较目标文件哈希
+async def test_patch_service_review_is_read_only(tmp_path: Path) -> None:
+    workspace, store = await _proposal(tmp_path, "old", "new")
+    proposal = store.read_proposal("incident-1")
+    target = workspace / "train.py"
+    before_bytes = target.read_bytes()
+
+    before, after = PatchService(workspace).review(
+        proposal,
+        store.patch_path(proposal),
+    )
+
+    assert before == "old\n"
+    assert after == "new\n"
+    assert target.read_bytes() == before_bytes
 
 
 # 功能：验证 apply 前目标文件哈希变化会被判定为 stale

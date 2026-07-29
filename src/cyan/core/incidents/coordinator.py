@@ -771,6 +771,31 @@ class IncidentCoordinator:
     async def list_jobs(self) -> list[dict[str, Any]]:
         return [await self.job_view(job.id) for job in self._jobs.list_jobs()]
 
+    # 返回当前待审批单文件 proposal 的不可变审阅文本
+    def review_proposal(
+        self,
+        job_id: str,
+        incident_id: str,
+        proposal_id: str,
+    ) -> tuple[str, str, str]:
+        spec = self._jobs.read_spec(job_id)
+        store = self._store_for_job(job_id)
+        incident = store.read_incident(incident_id)
+        if incident.job_id != job_id:
+            raise ValueError("incident belongs to another job")
+        if incident.status != "awaiting_approval":
+            raise ValueError("incident is not awaiting approval")
+        if incident.active_proposal_id != proposal_id:
+            raise ValueError("proposal is not active")
+        proposal = store.read_proposal(incident_id)
+        if proposal.id != proposal_id:
+            raise ValueError("proposal id mismatch")
+        before, after = PatchService(spec.workspace_root).review(
+            proposal,
+            store.patch_path(proposal),
+        )
+        return proposal.files[0].path, before, after
+
     # 校验 proposal 后应用补丁，按用户选择执行 smoke，再启动完整原命令
     async def decide(
         self,
