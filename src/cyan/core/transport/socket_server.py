@@ -122,6 +122,7 @@ def _trace_result(method: str | None, result: Any) -> Any:
             "data_chars": len(data),
             "data_bytes": len(data.encode("utf-8")),
             "next_offset": result.get("next_offset"),
+            "total_bytes": result.get("total_bytes"),
             "eof": result.get("eof"),
         }
     if method == "job.get":

@@ -38,6 +38,18 @@ async def _propose(
     replace: str,
     evidence: list[dict[str, str]] | None = None,
 ) -> object:
+    try:
+        tool._store.read_diagnosis(tool._incident_id)
+    except FileNotFoundError:
+        await SubmitDiagnosisTool(tool._store, tool._incident_id).invoke(
+            {
+                "category": "runtime",
+                "summary": "observed crash",
+                "root_cause": "the observed source causes the crash",
+                "evidence": [_workspace_evidence(path, target)],
+                "confidence": 1.0,
+            }
+        )
     return await tool.invoke(
         {
             "path": path,
@@ -147,7 +159,35 @@ async def test_propose_patch_generates_diff_without_workspace_write(
     assert proposal.files[0].change_type == "modify"
     assert proposal.files[0].base_sha256 == hashlib.sha256(b"old\n").hexdigest()
     assert proposal.patch_sha256 == sha256_bytes(patch.encode("utf-8"))
+    assert proposal.diagnosis_id == store.read_diagnosis("incident-1").id
     assert "-old\n+new\n" in patch
+
+
+# 功能：验证 propose_patch 由 harness 绑定当前 diagnosis 且不接受模型提供 ID
+# 设计：检查公开 schema 并在缺少 diagnosis 时直接调用工具，断言不会生成 proposal
+async def test_propose_patch_requires_harness_managed_diagnosis(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    target = workspace / "train.py"
+    target.write_text("old\n", encoding="utf-8")
+    store = IncidentStore(tmp_path / "incidents")
+    tool = ProposePatchTool(store, "incident-1", workspace)
+
+    result = await tool.invoke(
+        {
+            "path": "train.py",
+            "search": "old",
+            "replace": "new",
+            "evidence": [_workspace_evidence("train.py", target)],
+        }
+    )
+
+    assert "diagnosis_id" not in tool.input_schema["properties"]
+    assert getattr(result, "is_error")
+    assert "submit_diagnosis must succeed" in getattr(result, "content")
+    assert not (store.incident_dir("incident-1") / "proposal.json").exists()
 
 
 # 功能：验证零匹配仅首次返回 evidence 范围内的有界真实源码

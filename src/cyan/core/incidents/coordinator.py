@@ -626,7 +626,7 @@ class IncidentCoordinator:
             "Otherwise propose a patch only when one minimal source or config edit directly fixes "
             "the observed crash. Modify only the causal call site; do not harden similar sites, "
             "refactor, or make unrelated improvements. Then call propose_patch with one relative "
-            "file path, the diagnosis id, and one exact SEARCH/REPLACE pair. Copy the smallest "
+            "file path and one exact SEARCH/REPLACE pair. Copy the smallest "
             "unique contiguous SEARCH text verbatim from read_file or search_text output; do not "
             "write diff headers, hunks, or line numbers. If exact matching fails, use the returned "
             "real source feedback to correct the proposal once. If the corrected proposal still "

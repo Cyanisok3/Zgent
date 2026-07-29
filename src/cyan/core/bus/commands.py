@@ -174,6 +174,7 @@ class JobReadLogCommand(BaseModel):
 class JobReadLogResult(BaseModel):
     data: str
     next_offset: int
+    total_bytes: int
     eof: bool
 
 

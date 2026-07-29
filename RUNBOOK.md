@@ -78,8 +78,8 @@ find ~/.cyan/jobs -maxdepth 4 -type f
 
 ## 当前运维限制
 
-- JobStore 位于全局 `~/.cyan/jobs`；自动恢复会在全部 workspace 中选择唯一可处理 Job。
-- 附着已有 Attempt 时从 byte 0 回放日志，大历史日志可能需要一段时间追平。
+- JobStore 位于全局 `~/.cyan/jobs`；TUI 只自动恢复当前 workspace，`/jobs` 可显式选择其他任务。
+- 附着已有 Attempt 时显示每个 stream 最后 32 KiB 并从该 byte cursor 继续；完整日志保留在磁盘。
 - daemon 配置不随 TUI workspace 切换。
 
 ## 开发检查

@@ -12,7 +12,7 @@ from cyan.core.incidents.patch import (
     build_replacement_diff,
 )
 from cyan.core.incidents.store import IncidentStore
-from cyan.core.incidents.tools import ProposePatchTool
+from cyan.core.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
 
 
 # 初始化仅供 git apply 使用的真实临时工作树
@@ -29,18 +29,29 @@ async def _proposal(tmp_path: Path, old: str, new: str) -> tuple[Path, IncidentS
     target.write_text(old + "\n", encoding="utf-8")
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     store = IncidentStore(tmp_path / "incidents")
+    evidence = [
+        {
+            "source": "workspace",
+            "reference": f"train.py@sha256:{digest}#L1-L1",
+            "description": "Observed source line.",
+        }
+    ]
+    diagnosis = await SubmitDiagnosisTool(store, "incident-1").invoke(
+        {
+            "category": "runtime",
+            "summary": "observed crash",
+            "root_cause": "the observed source causes the crash",
+            "evidence": evidence,
+            "confidence": 1.0,
+        }
+    )
+    assert not diagnosis.is_error
     result = await ProposePatchTool(store, "incident-1", workspace).invoke(
         {
             "path": "train.py",
             "search": old,
             "replace": new,
-            "evidence": [
-                {
-                    "source": "workspace",
-                    "reference": f"train.py@sha256:{digest}#L1-L1",
-                    "description": "Observed source line.",
-                }
-            ],
+            "evidence": evidence,
         }
     )
     assert not result.is_error

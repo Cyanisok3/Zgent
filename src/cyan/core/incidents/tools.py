@@ -42,7 +42,6 @@ class ProposePatchParams(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     search: str = Field(min_length=1, max_length=_MAX_FILE_BYTES)
     replace: str = Field(max_length=_MAX_FILE_BYTES)
-    diagnosis_id: str | None = Field(default=None, min_length=1, max_length=128)
     evidence: list[EvidenceRef] = Field(default_factory=list, max_length=32)
 
 
@@ -144,7 +143,6 @@ class ProposePatchTool(BaseTool):
                 "type": "string",
                 "description": "Replacement text; may be empty.",
             },
-            "diagnosis_id": {"type": "string"},
             "evidence": {
                 "type": "array",
                 "items": {
@@ -191,6 +189,12 @@ class ProposePatchTool(BaseTool):
         if evidence_error is not None:
             return _validation_error(evidence_error)
         try:
+            try:
+                diagnosis = self._store.read_diagnosis(self._incident_id)
+            except FileNotFoundError as exc:
+                raise PatchError(
+                    "submit_diagnosis must succeed before propose_patch"
+                ) from exc
             target = resolve_workspace_path(
                 self._workspace_root,
                 parsed_params.path,
@@ -263,17 +267,13 @@ class ProposePatchTool(BaseTool):
                 )
             parsed_files = parse_unified_diff(patch)
             files = build_proposal_files(self._workspace_root, parsed_files)
-            if parsed_params.diagnosis_id is not None:
-                diagnosis = self._store.read_diagnosis(self._incident_id)
-                if diagnosis.id != parsed_params.diagnosis_id:
-                    raise PatchError("diagnosis_id does not match diagnosis artifact")
         except (OSError, PatchError, ValueError) as exc:
             return _validation_error(str(exc))
 
         proposal = Proposal(
             id=uuid4().hex,
             incident_id=self._incident_id,
-            diagnosis_id=parsed_params.diagnosis_id,
+            diagnosis_id=diagnosis.id,
             patch_sha256=sha256_bytes(patch_bytes),
             files=files,
             evidence=parsed_params.evidence,

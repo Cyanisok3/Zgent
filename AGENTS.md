@@ -120,9 +120,11 @@ owns hash checks, path checks, `git apply --check`, application, and safe revers
 ### Events and logs
 
 Raw process output is written only to attempt log files. The TUI reads it by byte cursor; never send
-each log line through EventBus. Incident `events.jsonl` omits per-token events and full tool output.
-IPC subscriptions use bounded per-client queues so slow clients cannot block process output.
-Daemon trace must summarize, rather than copy, logs, patches, tool I/O, token text, and user text.
+each log line through EventBus. When attaching an existing Attempt, the TUI shows a bounded log tail
+and continues from that byte cursor; complete logs remain on disk. Incident `events.jsonl` omits
+per-token events and full tool output. IPC subscriptions use bounded per-client queues so slow
+clients cannot block process output. Daemon trace must summarize, rather than copy, logs, patches,
+tool I/O, token text, and user text.
 
 ### Sessions
 

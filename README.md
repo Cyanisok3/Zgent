@@ -111,8 +111,9 @@ cyan-core
 ```
 
 原始进程输出只写 attempt 日志；TUI 按 byte cursor 读取。`launch.json` 为 `0600`，不会通过
-RPC 返回或暴露给 Agent。IPC 客户端使用独立有界队列，慢客户端不会阻塞训练日志落盘。
-daemon 配置在启动时固定；切换依赖不同项目配置的 workspace 前需要重启 daemon。
+RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部并从该 cursor 继续，完整日志
+仍保留在磁盘。IPC 客户端使用独立有界队列，慢客户端不会阻塞训练日志落盘。daemon 配置在
+启动时固定；切换依赖不同项目配置的 workspace 前需要重启 daemon。
 
 ## 当前验证范围
 

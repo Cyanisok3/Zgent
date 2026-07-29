@@ -110,14 +110,126 @@ def test_incident_action_choices_disable_apply_for_non_git_workspace() -> None:
     assert choices == [("reject", "Reject review-only patch")]
 
 
-# 功能：验证日志读取兼容 RPC 的 data 字段并推进稳定字节 offset
-# 设计：以含 EOF 的单个响应检查文本、next_offset 和终止标记，隔离 UI 轮询之外的协议解析
+# 功能：验证日志读取解析文本、游标、总字节数和 EOF
+# 设计：以单个响应检查四个稳定字段，隔离 UI 轮询之外的协议解析
 def test_log_result_reads_rpc_shape() -> None:
-    assert _log_result({"data": "boom\n", "next_offset": 17, "eof": True}) == (
+    assert _log_result(
+        {
+            "data": "boom\n",
+            "next_offset": 17,
+            "total_bytes": 17,
+            "eof": True,
+        }
+    ) == (
         "boom\n",
+        17,
         17,
         True,
     )
+
+
+# 功能：验证附着已有长日志时跳过历史前缀并从有界尾部继续
+# 设计：用 5 MiB 总量响应驱动两次 stdout 读取，断言只渲染尾部且游标落在文件末端
+async def test_attached_attempt_reads_persisted_log_tail() -> None:
+    total_bytes = 5 * 1024 * 1024
+    tail_offset = total_bytes - 32 * 1024
+
+    class _FakeClient:
+        # 初始化日志请求记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 按流和偏移返回长 stdout 或空 stderr
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            if params["stream"] == "stderr":
+                return {
+                    "data": "",
+                    "next_offset": 0,
+                    "total_bytes": 0,
+                    "eof": True,
+                }
+            if params["offset"] == 0:
+                return {
+                    "data": "old-prefix",
+                    "next_offset": 32 * 1024,
+                    "total_bytes": total_bytes,
+                    "eof": False,
+                }
+            assert params["offset"] == tail_offset
+            return {
+                "data": "recent-failure\n",
+                "next_offset": total_bytes,
+                "total_bytes": total_bytes,
+                "eof": True,
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-existing")
+    client = _FakeClient()
+    rendered_logs: list[tuple[str, str]] = []
+    rendered_notes: list[str] = []
+    app._client = client  # type: ignore[assignment]
+    app._snapshot = {
+        "job": {"id": "job-existing", "status": "failed"},
+        "attempt": {"id": "attempt-1", "status": "failed"},
+    }
+    app._append_log = (  # type: ignore[method-assign]
+        lambda stream, data: rendered_logs.append((stream, data))
+    )
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered_notes.append(content)
+    )
+
+    await app._read_logs()
+
+    stdout_offsets = [
+        params["offset"]
+        for method, params in client.commands
+        if method == "job.read_log" and params["stream"] == "stdout"
+    ]
+    assert stdout_offsets == [0, tail_offset]
+    assert rendered_logs == [("stdout", "recent-failure\n")]
+    assert app._offsets["stdout"] == total_bytes
+    assert any("showing the last 32768" in note for note in rendered_notes)
+
+
+# 功能：验证由当前 TUI 新启动的任务仍从日志 byte 0 连续显示
+# 设计：显式关闭首次 tail 模式并返回大总量，断言每个流只读取一次且保留 stdout 首块
+async def test_new_attempt_reads_log_from_start() -> None:
+    class _FakeClient:
+        # 初始化日志请求记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 为 stdout 返回首块并让 stderr 保持为空
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            data = "training-start\n" if params["stream"] == "stdout" else ""
+            return {
+                "data": data,
+                "next_offset": len(data.encode()),
+                "total_bytes": 5 * 1024 * 1024 if data else 0,
+                "eof": not data,
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437)
+    client = _FakeClient()
+    rendered_logs: list[tuple[str, str]] = []
+    app._client = client  # type: ignore[assignment]
+    app._select_job("job-new", tail_logs=False)
+    app._snapshot = {
+        "job": {"id": "job-new", "status": "running"},
+        "attempt": {"id": "attempt-1", "status": "running"},
+    }
+    app._append_log = (  # type: ignore[method-assign]
+        lambda stream, data: rendered_logs.append((stream, data))
+    )
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+
+    await app._read_logs()
+
+    assert [params["offset"] for _method, params in client.commands] == [0, 0]
+    assert rendered_logs == [("stdout", "training-start\n")]
 
 
 # 功能：验证统一多行输入框能在真实 Textual 生命周期中挂载并获得焦点
@@ -503,7 +615,9 @@ async def test_incident_action_select_submits_smoke_approval(tmp_path: Path) -> 
 
         app._render_incident()
         await pilot.pause()
-        assert app.query_one("#incident-actions", ContextActionSelect).has_focus
+        actions = app.query_one("#incident-actions", ContextActionSelect)
+        assert actions.has_focus
+        assert actions.parent is app.query_one("#context-actions")
 
         await pilot.press("enter")
         await pilot.pause()
@@ -553,6 +667,10 @@ async def test_running_job_action_clicks_cancel_without_stealing_focus(
         await pilot.pause()
 
         assert app.query_one("#prompt", ChatTextArea).has_focus
+        assert (
+            app.query_one("#job-actions", ContextActionSelect).parent
+            is app.query_one("#context-actions")
+        )
         assert await pilot.click("#job-actions", offset=(2, 0))
         await pilot.pause()
 
@@ -726,6 +844,47 @@ async def test_multiple_historical_jobs_keep_prompt_available(tmp_path: Path) ->
         assert not app._selection_in_progress
         assert not list(app.query("#job-picker"))
         assert app.query_one("#prompt", ChatTextArea).has_focus
+
+
+# 功能：验证自动恢复不会附着其他工作区的唯一运行任务
+# 设计：返回一个带外部 workspace 的可恢复 Job，检查当前项目保持空闲且提示显式 /jobs
+async def test_single_foreign_job_does_not_auto_attach(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+
+    class _FakeClient:
+        # 返回另一个工作区中唯一的运行任务
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            assert method == "job.list"
+            return {
+                "jobs": [
+                    {
+                        "job": {
+                            "id": "job-foreign",
+                            "status": "running",
+                            "updated_at": "2026-01-02T00:00:00Z",
+                        },
+                        "workspace_root": str(foreign),
+                        "argv": [sys.executable, "train.py"],
+                    }
+                ]
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+    rendered: list[str] = []
+    app._client = _FakeClient()  # type: ignore[assignment]
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered.append(content)
+    )
+
+    await app._choose_job()
+
+    assert app._job_id is None
+    assert app._skip_job_restore
+    assert rendered == [
+        "No active or pending job in this workspace. "
+        "Type /monitor to start one or /jobs to attach another workspace."
+    ]
 
 
 # 功能：验证 /jobs 显式打开历史任务选择器并在确认后附着所选 Job

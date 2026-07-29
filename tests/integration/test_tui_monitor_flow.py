@@ -62,6 +62,72 @@ async def test_monitor_start_runs_real_job_and_keeps_launch_private(
         await client.close()
 
 
+# 功能：验证 TUI 附着真实长日志任务时只展示尾部并从末端游标继续
+# 设计：经真实 daemon 运行输出 5 MiB 的子进程，再由 TUI 通过真实 RPC 读取并检查尾部标记
+async def test_attached_tui_reads_real_long_log_tail(
+    running_daemon: Any,
+    free_port: int,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "tail-workspace"
+    workspace.mkdir()
+    script = workspace / "long_log.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdout.write('PREFIX-MARKER\\n')\n"
+        "sys.stdout.write('x' * (5 * 1024 * 1024))\n"
+        "sys.stdout.write('\\nTAIL-MARKER\\n')\n",
+        encoding="utf-8",
+    )
+    client = SocketClient("127.0.0.1", free_port)
+    await client.connect()
+    event_task = asyncio.create_task(client.run_event_loop())
+
+    try:
+        started = await client.send_command(
+            "job.start",
+            {
+                "argv": [sys.executable, "long_log.py"],
+                "workspace_root": str(workspace),
+                "env": dict(os.environ),
+            },
+        )
+        job_id = str(started["job_id"])
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while True:
+            snapshot = await client.send_command("job.get", {"job_id": job_id})
+            if snapshot["job"]["status"] == "succeeded":
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("long-log training job did not finish")
+            await asyncio.sleep(0.05)
+
+        app = CyanTuiApp("127.0.0.1", free_port, job_id=job_id)
+        rendered_logs: list[str] = []
+        rendered_notes: list[str] = []
+        app._client = client
+        app._snapshot = snapshot
+        app._append_log = (  # type: ignore[method-assign]
+            lambda stream, data: rendered_logs.append(data)
+        )
+        app._append_text = (  # type: ignore[method-assign]
+            lambda content, style="": rendered_notes.append(content)
+        )
+
+        await app._read_logs()
+
+        stdout = "".join(rendered_logs)
+        assert "TAIL-MARKER" in stdout
+        assert "PREFIX-MARKER" not in stdout
+        assert len(stdout.encode()) <= 32 * 1024
+        assert any("showing the last 32768" in note for note in rendered_notes)
+    finally:
+        event_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await event_task
+        await client.close()
+
+
 # 功能：验证多个真实运行中 Job 不阻塞键盘输入的 /monitor 新任务流程
 # 设计：通过真实 daemon 先启动两个长任务，再在 Textual DOM 输入命令并确认第三个子进程成功
 async def test_multiple_jobs_keep_real_tui_monitor_flow_available(

@@ -82,7 +82,12 @@ def test_job_log_response_trace_redacts_raw_data() -> None:
     secret = "RAW-TRAINING-LOG-秘密"
     response = JsonRpcSuccess(
         id="rpc-1",
-        result={"data": secret, "next_offset": 42, "eof": False},
+        result={
+            "data": secret,
+            "next_offset": 42,
+            "total_bytes": 128,
+            "eof": False,
+        },
     )
 
     traced = _trace_response("job.read_log", response)
@@ -93,6 +98,7 @@ def test_job_log_response_trace_redacts_raw_data() -> None:
         "data_chars": len(secret),
         "data_bytes": len(secret.encode()),
         "next_offset": 42,
+        "total_bytes": 128,
         "eof": False,
     }
     assert response.result["data"] == secret

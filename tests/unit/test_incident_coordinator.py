@@ -185,7 +185,6 @@ class _IncidentProvider:
                 ],
             )
         if self._step == 4:
-            diagnosis = _latest_tool_json(messages)
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -199,7 +198,6 @@ class _IncidentProvider:
                                 "sys.exit(2)"
                             ),
                             "replace": 'print("recovered")',
-                            "diagnosis_id": str(diagnosis["id"]),
                             "evidence": self._evidence,
                         },
                     )

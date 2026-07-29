@@ -922,6 +922,7 @@
 |---|---|---|
 | `data` | `string` | yes |
 | `next_offset` | `integer` | yes |
+| `total_bytes` | `integer` | yes |
 | `eof` | `boolean` | yes |
 
 ```json
@@ -935,6 +936,10 @@
       "title": "Next Offset",
       "type": "integer"
     },
+    "total_bytes": {
+      "title": "Total Bytes",
+      "type": "integer"
+    },
     "eof": {
       "title": "Eof",
       "type": "boolean"
@@ -943,6 +948,7 @@
   "required": [
     "data",
     "next_offset",
+    "total_bytes",
     "eof"
   ],
   "title": "JobReadLogResult",

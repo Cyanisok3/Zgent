@@ -14,7 +14,7 @@ from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
@@ -36,6 +36,7 @@ _LOCAL_SLASH_COMMANDS = (
     ("incident", "send a follow-up to the read-only Incident Agent"),
     ("help", "show local TUI commands"),
 )
+_LOG_READ_BYTES = 32 * 1024
 _ACTIVE_JOB_STATUSES = {"starting", "running"}
 _ACTIVE_INCIDENT_STATUSES = {
     "diagnosing",
@@ -132,11 +133,12 @@ def _incident_action_choices(
     ]
 
 
-# 兼容日志 RPC 字段并返回文本、下一字节位置和 EOF
-def _log_result(result: dict[str, Any]) -> tuple[str, int, bool]:
+# 读取日志 RPC 的文本、下一字节位置、总字节数和 EOF
+def _log_result(result: dict[str, Any]) -> tuple[str, int, int, bool]:
     data = str(result.get("data", result.get("text", "")))
     next_offset = int(result.get("next_offset", result.get("end_offset", 0)))
-    return data, next_offset, bool(result.get("eof", False))
+    total_bytes = int(result["total_bytes"])
+    return data, next_offset, total_bytes, bool(result.get("eof", False))
 
 
 # 将 Attempt 起止时间转换为稳定的短运行时长标签
@@ -209,6 +211,12 @@ def _job_label(entry: dict[str, Any]) -> str:
     status = str(record.get("status", "unknown"))
     cwd = f"  {workspace}" if workspace else ""
     return f"{status:10}  {job_id}  {command}{cwd}"
+
+
+# 判断任务启动目录是否与当前 TUI 工作区一致
+def _job_matches_workspace(entry: dict[str, Any], workspace_root: Path) -> bool:
+    _argv, workspace = _launch_fields(entry)
+    return bool(workspace) and Path(workspace).expanduser().resolve() == workspace_root
 
 
 class SlashCompleteWidget(Static):
@@ -590,6 +598,11 @@ class CyanTuiApp(App[None]):
         scrollbar-size-vertical: 1;
     }
     #timeline Static { height: auto; padding: 0 0 1 0; }
+    #context-actions {
+        height: auto;
+        max-height: 18;
+        padding: 0 1;
+    }
     #job-picker, #incident-actions, #job-actions {
         height: auto;
         max-height: 16;
@@ -629,6 +642,7 @@ class CyanTuiApp(App[None]):
         self._skip_job_restore = False
         self._attempt_id: str | None = None
         self._offsets = {"stdout": 0, "stderr": 0}
+        self._tail_logs_on_next_attempt = job_id is not None
         self._snapshot: dict[str, Any] = {}
         self._incident_id: str | None = None
         self._proposal_id: str | None = None
@@ -669,6 +683,7 @@ class CyanTuiApp(App[None]):
             ),
             id="timeline",
         )
+        yield Vertical(id="context-actions")
         yield ChatTextArea("", id="prompt")
 
     # 挂载后启动唯一的连接与轮询 worker
@@ -778,7 +793,7 @@ class CyanTuiApp(App[None]):
         )
 
     # 切换附着目标时重置仅属于旧 Job 的事件和展示状态
-    def _select_job(self, job_id: str) -> None:
+    def _select_job(self, job_id: str, *, tail_logs: bool = True) -> None:
         if job_id != self._job_id:
             self._job_event_seq = 0
             self._attempt_id = None
@@ -791,6 +806,7 @@ class CyanTuiApp(App[None]):
             self._shown_proposal_id = None
             self._shown_smoke = None
             self._shown_incident_status = None
+            self._tail_logs_on_next_attempt = tail_logs
         self._job_id = job_id
         self._skip_job_restore = False
 
@@ -800,13 +816,30 @@ class CyanTuiApp(App[None]):
             return
         result = await self._client.send_command("job.list", {})
         raw_jobs = result.get("jobs", [])
-        jobs = _actionable_jobs(
+        all_jobs = _actionable_jobs(
             [entry for entry in raw_jobs if isinstance(entry, dict)]
             if isinstance(raw_jobs, list)
             else []
         )
+        jobs = (
+            all_jobs
+            if interactive
+            else [
+                entry
+                for entry in all_jobs
+                if _job_matches_workspace(entry, self._workspace_root)
+            ]
+        )
         if not jobs:
-            self._append_text("No active or pending job. Type /monitor to start one.")
+            if all_jobs and not interactive:
+                self._skip_job_restore = True
+                self._append_text(
+                    "No active or pending job in this workspace. "
+                    "Type /monitor to start one or /jobs to attach another workspace.",
+                    style="dim cyan",
+                )
+            else:
+                self._append_text("No active or pending job. Type /monitor to start one.")
             return
         if len(jobs) == 1:
             self._select_job(str(_job_record(jobs[0]).get("id", "")))
@@ -870,7 +903,7 @@ class CyanTuiApp(App[None]):
             self._selection_ready.set()
         self.query_one("#prompt", ChatTextArea).focus()
 
-    # 挂载或更新单个稳定 ID 的上下文选择器并滚动到可见位置
+    # 在日志区外挂载或更新单个稳定 ID 的上下文选择器
     def _mount_context_actions(
         self,
         widget_id: str,
@@ -883,15 +916,14 @@ class CyanTuiApp(App[None]):
             if current.action_choices == tuple(choices):
                 return
             current.remove()
-        timeline = self.query_one("#timeline", VerticalScroll)
-        timeline.mount(
+        action_host = self.query_one("#context-actions", Vertical)
+        action_host.mount(
             ContextActionSelect(
                 choices,
                 id=widget_id,
                 auto_focus=auto_focus,
             )
         )
-        timeline.scroll_end(animate=False)
 
     # 根据输入框斜杠前缀挂载、更新或移除自动补全
     def on_chat_text_area_slash_changed(self, event: ChatTextArea.SlashChanged) -> None:
@@ -1025,6 +1057,10 @@ class CyanTuiApp(App[None]):
             self._attempt_id = attempt_id
             self._offsets = {"stdout": 0, "stderr": 0}
             self._append_text(f"attempt {attempt_id}", style="bold")
+            tail_logs = self._tail_logs_on_next_attempt
+            self._tail_logs_on_next_attempt = False
+        else:
+            tail_logs = False
         for stream in ("stdout", "stderr"):
             result = await self._client.send_command(
                 "job.read_log",
@@ -1033,10 +1069,28 @@ class CyanTuiApp(App[None]):
                     "attempt_id": attempt_id,
                     "stream": stream,
                     "offset": self._offsets[stream],
-                    "limit": 32 * 1024,
+                    "limit": _LOG_READ_BYTES,
                 },
             )
-            data, next_offset, _eof = _log_result(result)
+            data, next_offset, total_bytes, _eof = _log_result(result)
+            if tail_logs and total_bytes > _LOG_READ_BYTES:
+                tail_offset = total_bytes - _LOG_READ_BYTES
+                result = await self._client.send_command(
+                    "job.read_log",
+                    {
+                        "job_id": self._job_id,
+                        "attempt_id": attempt_id,
+                        "stream": stream,
+                        "offset": tail_offset,
+                        "limit": _LOG_READ_BYTES,
+                    },
+                )
+                data, next_offset, _total_bytes, _eof = _log_result(result)
+                self._append_text(
+                    f"{stream}: showing the last {_LOG_READ_BYTES} of "
+                    f"{total_bytes} persisted bytes",
+                    style="dim",
+                )
             self._offsets[stream] = next_offset
             if data:
                 self._append_log(stream, data)
@@ -1356,7 +1410,7 @@ class CyanTuiApp(App[None]):
         )
         job_id = str(result["job_id"])
         self._pending_launch = None
-        self._select_job(job_id)
+        self._select_job(job_id, tail_logs=False)
         await self._subscribe_job_events()
         self._append_text(f"Training started: {job_id}", style="bold cyan")
 

@@ -364,6 +364,7 @@ class CoreApp:
         return JobReadLogResult(
             data=chunk.text,
             next_offset=chunk.end_offset,
+            total_bytes=chunk.total_bytes,
             eof=chunk.eof,
         )
 
