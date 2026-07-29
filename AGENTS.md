@@ -21,6 +21,9 @@ For every behavior change, define the observable outcome and verify it with the 
 test. Incident integration tests must use real temporary Git repositories and real subprocesses;
 never fake a frontend result.
 
+Root documentation describes the current product only. Replace stale results and commands instead
+of appending version-by-version narratives; keep historical migration notes out of the root.
+
 ## Product boundary
 
 cyan is a local ML-training Incident Agent, not an AutoResearch system.
@@ -129,7 +132,9 @@ Job and Incident session. An Incident follow-up must reuse its read-only profile
 ### Configuration
 
 Priority is defaults, `~/.cyan/config.toml`, project `.cyan/config.toml`, `.env`, then environment
-variables. Relevant prefixes are `CYAN_*`. The optional smoke declaration is:
+variables. Relevant prefixes are `CYAN_*`. Daemon configuration is resolved once from its startup
+directory; switching workspaces does not reload it. The optional smoke declaration is loaded from
+each Job workspace:
 
 ```toml
 [incident.smoke]

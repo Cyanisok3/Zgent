@@ -1,28 +1,28 @@
 # cyan 运维手册
 
-## 用户入口
+## 用户流程
 
-```bash
-# 从模型项目根目录启动 daemon 和项目级 TUI
-cyan
+从模型项目根目录运行 `cyan`，然后：
+
+```text
+/monitor
+# 粘贴训练命令并检查预览
+/start
 ```
 
-在 TUI 中输入 `/monitor`，粘贴训练命令，检查确定性预览后输入 `/start`。`Ctrl+Q`
-只 detach；只有显式 `/cancel-job` 才请求取消当前进程组。`cyan watch -- <argv>` 仍是
-兼容入口。
+本地命令为 `/monitor`、`/start`、`/jobs`、`/incident <text>` 和 `/help`。补丁批准、拒绝
+和训练取消不是 slash command，只在对应状态出现：
 
-Incident 追问使用 `/incident <文本>`；补丁操作使用 `/approve`、
-`/approve-no-smoke` 和 `/reject`。普通文本始终进入本次 TUI 新建的普通聊天，不会被
-解释为 Incident 决策。
+- 运行中：`Cancel training process`
+- 有 smoke：`Approve and run smoke`、`Approve without smoke`、`Reject patch`
+- 无 smoke：`Approve and rerun original command`、`Reject patch`
+- 非 Git workspace：只允许 `Reject patch`
 
-输入 `/` 会打开本地命令与 Agent skills 补全，使用上下键和 Enter 选择。普通 Agent
-触发 `permission.requested` 时，TUI 会聚焦权限选择器并通过 `permission.respond`
-返回选择；Incident Agent 的只读工具边界不受影响。历史终态 Job/Incident 不阻止新的
-`/monitor`，真实运行中的训练仍需先 `/cancel-job`。
+选择器支持鼠标或上下键和 Enter。`Esc` 返回输入框，`Ctrl+Q` 只分离 TUI。
 
-## daemon
+## daemon 与配置
 
-正常流程会自动启动 daemon。开发诊断时可单独操作：
+正常流程自动启动 daemon。开发诊断命令：
 
 ```bash
 uv run cyan core status
@@ -31,44 +31,21 @@ uv run cyan core stop
 uv run cyan ping
 ```
 
-默认监听 `127.0.0.1:7437`，传输为 TCP loopback 上的 NDJSON/JSON-RPC 2.0；配置为
-非 loopback 地址会在 daemon 启动前被拒绝。v1 不启动项目或全局配置中的 MCP server。
+daemon 默认监听 `127.0.0.1:7437`，拒绝非 loopback 地址，且 v1 不启动配置中的 MCP server。
 
-## 配置
+未设置 `CYAN_CONFIG` 时，配置优先级为：默认值、`~/.cyan/config.toml`、启动目录
+`.cyan/config.toml`、`.env`、系统环境变量；设置后只读取指定 TOML，再应用环境变量。常用
+变量为 `CYAN_CONFIG`、`CYAN_HOST`、`CYAN_PORT`、`CYAN_LOG_LEVEL`、`CYAN_LOG_FILE`、
+`CYAN_LLM_DEFAULT_MODEL` 和 `CYAN_PERMISSION_TIMEOUT_S`。
 
-优先级从低到高为：内建默认值、`~/.cyan/config.toml`、项目 `.cyan/config.toml`、`.env`、
-系统环境变量。
-
-```toml
-[core]
-host = "127.0.0.1"
-port = 7437
-
-[logging]
-level = "INFO"
-file = "~/.cyan/logs/core.log"
-format = "text"
-```
-
-项目可选 smoke：
+daemon 只在启动时解析自身配置。之后从其他目录启动的 TUI 会复用它；若依赖另一项目的
+daemon/LLM 配置，应先停止并在新目录重启。Smoke 配置始终从 Job workspace 读取：
 
 ```toml
 [incident.smoke]
 argv = ["python", "smoke_train.py", "--steps", "2"]
 timeout_s = 300
 ```
-
-常用环境变量：
-
-| 变量 | 默认值 |
-|---|---|
-| `CYAN_CONFIG` | `~/.cyan/config.toml` |
-| `CYAN_HOST` | `127.0.0.1` |
-| `CYAN_PORT` | `7437` |
-| `CYAN_LOG_LEVEL` | `INFO` |
-| `CYAN_LOG_FILE` | `~/.cyan/logs/core.log` |
-| `CYAN_LOG_FORMAT` | `text` |
-| `CYAN_LLM_DEFAULT_MODEL` | `claude-sonnet-4-6` |
 
 ## 诊断文件
 
@@ -77,35 +54,39 @@ tail -f ~/.cyan/logs/core.log
 find ~/.cyan/jobs -maxdepth 4 -type f
 ```
 
-- `launch.json` 为 `0600`，不得复制到 issue 或日志；
-- `attempts/*/stdout.log` 与 `stderr.log` 是完整原始输出；
-- `failure.json` 是失败时固定的 capsule；
-- `incidents/*/proposal.diff` 只是 proposal，审批前不会修改 workspace。
-- `incidents/*/smoke-execution.json` 保存可校验的 verifier PID 与启动身份；
-- `traces/daemon.jsonl` 只记录日志、补丁、工具 I/O 和用户文本的字段/体积摘要。
+- `launch.json`：精确 argv/cwd/env，权限 `0600`，不得复制到 issue；
+- `attempts/*/{stdout,stderr}.log`：完整原始输出；
+- `failure.json`：失败时固定的 capsule；
+- `incidents/*/{diagnosis.json,proposal.diff}`：诊断和候选补丁；
+- `incidents/*/smoke-execution.json`：verifier PID 与进程身份；
+- `traces/daemon.jsonl`：脱敏后的结构化 trace 摘要。
 
-## 常见状态
+## Incident 状态
 
 | 状态 | 含义 |
 |---|---|
-| `diagnosing` | 只读 Agent 正在调查 |
-| `awaiting_approval` | diagnosis 与 diff 已就绪 |
-| `smoke_running` | 正在运行用户声明的短验证 |
-| `retry_running` | 已用原命令做最终验证 |
-| `resolved` | 原命令真实退出码为 0 |
-| `stale` | workspace hash 已变化，未应用补丁 |
-| `rollback_blocked` | smoke 后文件又变化，自动回滚被安全阻止 |
-| `unresolved` | 没有可信 proposal 或验证被中断 |
+| `diagnosing` | 只读调查 |
+| `awaiting_approval` | diagnosis 与 preflight-valid diff 已就绪 |
+| `smoke_running` | 运行用户声明的 smoke |
+| `retry_running` | 用原命令最终验证 |
+| `resolved` / `rejected` | 原命令成功 / 用户拒绝 |
+| `stale` | workspace 或 smoke 配置变化，未应用 |
+| `rollback_blocked` | 文件变化，自动回滚被阻止 |
+| `unresolved` | 没有可信 proposal 或验证未完成 |
 
-daemon 在 smoke 期间异常退出时，重启恢复会先用 PID、启动身份、session leader 和进程组
-leader 四项校验遗留进程，确认终止后才把 Incident 置为 `unresolved` 并开放追问。
+恢复遗留 smoke 时，只有 PID、启动身份、session leader 和进程组 leader 全部匹配才会终止。
+
+## 当前运维限制
+
+- JobStore 位于全局 `~/.cyan/jobs`；自动恢复会在全部 workspace 中选择唯一可处理 Job。
+- 附着已有 Attempt 时从 byte 0 回放日志，大历史日志可能需要一段时间追平。
+- daemon 配置不随 TUI workspace 切换。
 
 ## 开发检查
 
 ```bash
 uv run ruff check src tests scripts
 uv run mypy src
-uv run pytest tests/unit -v
-uv run pytest tests/integration -v
+uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
 ```
