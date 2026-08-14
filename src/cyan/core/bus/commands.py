@@ -6,6 +6,8 @@ from pydantic import BaseModel, Discriminator, Field
 
 from cyan.core.session.model import SessionMode, SessionStatus
 
+WIRE_PROTOCOL_VERSION = 1
+
 
 class PingCommand(BaseModel):
     type: Literal["core.ping"] = "core.ping"
@@ -14,6 +16,8 @@ class PingCommand(BaseModel):
 
 class PongResult(BaseModel):
     server_version: str
+    protocol_version: int
+    startup_workspace_root: str
     uptime_ms: int
     received_at: str  # ISO 8601
 
@@ -121,6 +125,34 @@ class JobStartResult(BaseModel):
     job_id: str
 
 
+class LaunchPreviewCommand(BaseModel):
+    type: Literal["launch.preview"] = "launch.preview"
+    command: str = Field(min_length=1, max_length=64 * 1024)
+    workspace_root: str
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class LaunchPreviewResult(BaseModel):
+    argv: list[str]
+    cwd: str
+    env_overrides: dict[str, str]
+    executable: str
+    config_paths: list[str]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class LaunchStartCommand(BaseModel):
+    type: Literal["launch.start"] = "launch.start"
+    command: str = Field(min_length=1, max_length=64 * 1024)
+    workspace_root: str
+    env: dict[str, str] = Field(default_factory=dict)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class LaunchStartResult(BaseModel):
+    job_id: str
+
+
 class JobListCommand(BaseModel):
     type: Literal["job.list"] = "job.list"
 
@@ -174,6 +206,7 @@ class JobReadLogCommand(BaseModel):
 class JobReadLogResult(BaseModel):
     data: str
     next_offset: int
+    total_bytes: int
     eof: bool
 
 
@@ -193,6 +226,20 @@ class IncidentDecideResult(BaseModel):
     status: str
 
 
+class IncidentReviewCommand(BaseModel):
+    type: Literal["incident.review"] = "incident.review"
+    job_id: str
+    incident_id: str
+    proposal_id: str
+
+
+class IncidentReviewResult(BaseModel):
+    proposal_id: str
+    path: str
+    before_text: str
+    after_text: str
+
+
 # 根据 type 字段决定命令类型的判别联合
 Command = Annotated[
     PingCommand
@@ -206,10 +253,13 @@ Command = Annotated[
     | PermissionRespondCommand
     | SessionCompactCommand
     | JobStartCommand
+    | LaunchPreviewCommand
+    | LaunchStartCommand
     | JobListCommand
     | JobGetCommand
     | JobCancelCommand
     | JobReadLogCommand
-    | IncidentDecideCommand,
+    | IncidentDecideCommand
+    | IncidentReviewCommand,
     Discriminator("type"),
 ]

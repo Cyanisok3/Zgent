@@ -6,15 +6,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from cyan.tui.app import (
+    _LOCAL_SLASH_COMMANDS,
     ChatTextArea,
+    ContextActionSelect,
     CyanTuiApp,
     PermissionSelect,
     SlashCompleteWidget,
     _actionable_jobs,
-    _approval_hint,
     _diagnosis_body,
     _elapsed_label,
+    _incident_action_choices,
     _log_result,
 )
 
@@ -46,16 +50,34 @@ def test_actionable_jobs_filters_and_orders() -> None:
     ]
 
 
-# 功能：验证只有声明 smoke verifier 时才展示真实命令、超时和带 smoke 的批准操作
-# 设计：分别传入空配置和完整配置，锁定用户批准前看到的实际 verifier 契约
-def test_approval_hint_only_shows_smoke_when_configured() -> None:
-    assert "smoke" not in _approval_hint(None).lower()
-    hint = _approval_hint({"argv": ["python", "smoke.py", "--quick"], "timeout_s": 45.0})
-    assert "smoke" in hint.lower()
-    assert "$ python smoke.py --quick" in hint
-    assert "timeout=45.0s" in hint
-    assert "/approve-no-smoke" in hint
-    assert "/reject" in hint
+# 功能：验证本地 slash command 只保留监视、任务选择、Incident 追问和帮助入口
+# 设计：直接检查稳定命令名集合，防止审批或取消动作重新泄漏到全局输入空间
+def test_local_slash_commands_exclude_context_actions() -> None:
+    assert [name for name, _description in _LOCAL_SLASH_COMMANDS] == [
+        "monitor",
+        "start",
+        "jobs",
+        "incident",
+        "help",
+    ]
+
+
+# 功能：验证 smoke 配置只在上下文审批选项中增加带 smoke 的明确动作
+# 设计：比较无配置和完整配置的稳定 action id，锁定 RPC 映射不再依赖 slash command
+def test_incident_action_choices_only_add_smoke_when_configured() -> None:
+    plain = _incident_action_choices(None)
+    smoke = _incident_action_choices(
+        {"argv": ["python", "smoke.py", "--quick"], "timeout_s": 45.0}
+    )
+
+    assert [action for action, _label in plain] == ["approve", "reject"]
+    assert [action for action, _label in smoke] == [
+        "approve-smoke",
+        "approve",
+        "reject",
+    ]
+    assert "python smoke.py --quick" in smoke[0][1]
+    assert "timeout=45.0s" in smoke[0][1]
 
 
 # 功能：验证 TUI 的 attempt 时长与诊断正文保留演示所需的真实信息
@@ -77,24 +99,137 @@ def test_elapsed_and_diagnosis_display_helpers() -> None:
     assert "dataset emits 3 channels" in body
 
 
-# 功能：验证非 Git 工作区只展示审阅和拒绝，不暴露任何批准入口
-# 设计：显式传入 can_apply=false 并检查 A/R 文案缺失，锁定后端安全门在前端的对应反馈
-def test_approval_hint_disables_apply_for_non_git_workspace() -> None:
-    hint = _approval_hint({"argv": ["python", "smoke.py"]}, can_apply=False)
+# 功能：验证非 Git 工作区的上下文控件只允许拒绝 review-only proposal
+# 设计：显式传入 can_apply=false 并检查唯一 action id，锁定前端不能绕过后端安全门
+def test_incident_action_choices_disable_apply_for_non_git_workspace() -> None:
+    choices = _incident_action_choices(
+        {"argv": ["python", "smoke.py"]},
+        can_apply=False,
+    )
 
-    assert "review-only" in hint
-    assert "/reject" in hint
-    assert "/approve" not in hint
+    assert choices == [("reject", "Reject review-only patch")]
 
 
-# 功能：验证日志读取兼容 RPC 的 data 字段并推进稳定字节 offset
-# 设计：以含 EOF 的单个响应检查文本、next_offset 和终止标记，隔离 UI 轮询之外的协议解析
+# 功能：验证日志读取解析文本、游标、总字节数和 EOF
+# 设计：以单个响应检查四个稳定字段，隔离 UI 轮询之外的协议解析
 def test_log_result_reads_rpc_shape() -> None:
-    assert _log_result({"data": "boom\n", "next_offset": 17, "eof": True}) == (
+    assert _log_result(
+        {
+            "data": "boom\n",
+            "next_offset": 17,
+            "total_bytes": 17,
+            "eof": True,
+        }
+    ) == (
         "boom\n",
+        17,
         17,
         True,
     )
+
+
+# 功能：验证附着已有长日志时跳过历史前缀并从有界尾部继续
+# 设计：用 5 MiB 总量响应驱动两次 stdout 读取，断言只渲染尾部且游标落在文件末端
+async def test_attached_attempt_reads_persisted_log_tail() -> None:
+    total_bytes = 5 * 1024 * 1024
+    tail_offset = total_bytes - 32 * 1024
+
+    class _FakeClient:
+        # 初始化日志请求记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 按流和偏移返回长 stdout 或空 stderr
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            if params["stream"] == "stderr":
+                return {
+                    "data": "",
+                    "next_offset": 0,
+                    "total_bytes": 0,
+                    "eof": True,
+                }
+            if params["offset"] == 0:
+                return {
+                    "data": "old-prefix",
+                    "next_offset": 32 * 1024,
+                    "total_bytes": total_bytes,
+                    "eof": False,
+                }
+            assert params["offset"] == tail_offset
+            return {
+                "data": "recent-failure\n",
+                "next_offset": total_bytes,
+                "total_bytes": total_bytes,
+                "eof": True,
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-existing")
+    client = _FakeClient()
+    rendered_logs: list[tuple[str, str]] = []
+    rendered_notes: list[str] = []
+    app._client = client  # type: ignore[assignment]
+    app._snapshot = {
+        "job": {"id": "job-existing", "status": "failed"},
+        "attempt": {"id": "attempt-1", "status": "failed"},
+    }
+    app._append_log = (  # type: ignore[method-assign]
+        lambda stream, data: rendered_logs.append((stream, data))
+    )
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered_notes.append(content)
+    )
+
+    await app._read_logs()
+
+    stdout_offsets = [
+        params["offset"]
+        for method, params in client.commands
+        if method == "job.read_log" and params["stream"] == "stdout"
+    ]
+    assert stdout_offsets == [0, tail_offset]
+    assert rendered_logs == [("stdout", "recent-failure\n")]
+    assert app._offsets["stdout"] == total_bytes
+    assert any("showing the last 32768" in note for note in rendered_notes)
+
+
+# 功能：验证由当前 TUI 新启动的任务仍从日志 byte 0 连续显示
+# 设计：显式关闭首次 tail 模式并返回大总量，断言每个流只读取一次且保留 stdout 首块
+async def test_new_attempt_reads_log_from_start() -> None:
+    class _FakeClient:
+        # 初始化日志请求记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 为 stdout 返回首块并让 stderr 保持为空
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            data = "training-start\n" if params["stream"] == "stdout" else ""
+            return {
+                "data": data,
+                "next_offset": len(data.encode()),
+                "total_bytes": 5 * 1024 * 1024 if data else 0,
+                "eof": not data,
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437)
+    client = _FakeClient()
+    rendered_logs: list[tuple[str, str]] = []
+    app._client = client  # type: ignore[assignment]
+    app._select_job("job-new", tail_logs=False)
+    app._snapshot = {
+        "job": {"id": "job-new", "status": "running"},
+        "attempt": {"id": "attempt-1", "status": "running"},
+    }
+    app._append_log = (  # type: ignore[method-assign]
+        lambda stream, data: rendered_logs.append((stream, data))
+    )
+    app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+
+    await app._read_logs()
+
+    assert [params["offset"] for _method, params in client.commands] == [0, 0]
+    assert rendered_logs == [("stdout", "training-start\n")]
 
 
 # 功能：验证统一多行输入框能在真实 Textual 生命周期中挂载并获得焦点
@@ -435,6 +570,119 @@ async def test_smoke_approval_sends_displayed_config_fingerprint() -> None:
     ]
 
 
+# 功能：验证待审批 proposal 自动展示聚焦选择器并用 Enter 提交带 smoke 的决定
+# 设计：在真实 Textual DOM 渲染 snapshot，按下 Enter 后检查 proposal 和配置指纹绑定
+async def test_incident_action_select_submits_smoke_approval(tmp_path: Path) -> None:
+    class _FakeClient:
+        # 初始化 Incident 命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 记录上下文选择器发出的审批请求
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            return {"status": "smoke_running"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1", workspace_root=tmp_path)
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+    fingerprint = "a" * 64
+    client = _FakeClient()
+
+    async with app.run_test() as pilot:
+        app._client = client  # type: ignore[assignment]
+        app._snapshot = {
+            "incident": {
+                "id": "incident-1",
+                "status": "awaiting_approval",
+                "session_id": "session-1",
+            },
+            "diagnosis": {
+                "id": "diagnosis-1",
+                "summary": "shape mismatch",
+                "root_cause": "wrong classifier width",
+            },
+            "proposal": {"id": "proposal-1", "files": []},
+            "patch": "--- a/train.py\n+++ b/train.py\n",
+            "smoke_config": {"argv": ["python", "smoke.py"], "timeout_s": 30},
+            "smoke_config_fingerprint": fingerprint,
+            "can_apply": True,
+        }
+
+        app._render_incident()
+        await pilot.pause()
+        actions = app.query_one("#incident-actions", ContextActionSelect)
+        assert actions.has_focus
+        assert actions.parent is app.query_one("#context-actions")
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert client.commands == [
+            (
+                "incident.decide",
+                {
+                    "incident_id": "incident-1",
+                    "proposal_id": "proposal-1",
+                    "decision": "approve",
+                    "run_smoke": True,
+                    "smoke_config_fingerprint": fingerprint,
+                },
+            )
+        ]
+
+
+# 功能：验证运行期取消控件不抢聊天焦点并可通过鼠标发送 job.cancel
+# 设计：渲染 running snapshot 后点击唯一动作，检查焦点和现有取消 RPC
+async def test_running_job_action_clicks_cancel_without_stealing_focus(
+    tmp_path: Path,
+) -> None:
+    class _FakeClient:
+        # 初始化 Job 命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 记录上下文控件发出的取消请求
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            return {"status": "cancelling"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1", workspace_root=tmp_path)
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+    client = _FakeClient()
+
+    async with app.run_test() as pilot:
+        app._client = client  # type: ignore[assignment]
+        app._snapshot = {"job": {"id": "job-1", "status": "running"}}
+        app._render_job_actions()
+        await pilot.pause()
+
+        assert app.query_one("#prompt", ChatTextArea).has_focus
+        assert (
+            app.query_one("#job-actions", ContextActionSelect).parent
+            is app.query_one("#context-actions")
+        )
+        assert await pilot.click("#job-actions", offset=(2, 0))
+        await pilot.pause()
+
+        assert client.commands == [
+            ("job.cancel", {"job_id": "job-1"}),
+        ]
+        app._snapshot = {"job": {"id": "job-1", "status": "cancelled"}}
+        app._render_job_actions()
+        await pilot.pause()
+        assert not list(app.query("#job-actions"))
+
+
 # 功能：验证统一输入框中的单独 A 只会发送普通聊天，不会触发 Incident 审批
 # 设计：同时预置有效提案和聊天会话，以命令记录锁定历史焦点冲突不会复发
 async def test_plain_a_routes_to_chat_instead_of_incident_decision() -> None:
@@ -470,41 +718,44 @@ async def test_plain_a_routes_to_chat_instead_of_incident_decision() -> None:
     assert app._awaiting_approval
 
 
-# 功能：验证只有显式 /approve 才会提交当前 Incident 提案
-# 设计：绕过 Textual 事件层调用统一路由，断言审批参数仍绑定当前提案
-async def test_explicit_approve_command_decides_incident() -> None:
+@pytest.mark.parametrize(
+    "legacy_command",
+    ["/approve", "/approve-no-smoke", "/reject", "/cancel-job"],
+)
+# 功能：验证已删除的旧命令只进入普通聊天且不能修改 Job 或 Incident
+# 设计：逐个提交四个旧 slash command，排除隐藏兼容审批或取消入口
+async def test_removed_local_commands_cannot_change_state(legacy_command: str) -> None:
     class _FakeClient:
-        # 初始化命令记录
+        # 初始化聊天和 Incident 命令记录
         def __init__(self) -> None:
             self.commands: list[tuple[str, dict[str, Any]]] = []
 
-        # 记录 Incident 决策
+        # 为普通聊天返回 run id 并接受订阅
         async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
             self.commands.append((method, params))
-            return {"status": "retry_running"}
+            if method == "session.send_message":
+                return {"run_id": "run-chat"}
+            return {"subscription_id": "sub-chat"}
 
     app = CyanTuiApp("127.0.0.1", 7437, job_id="job-1")
     client = _FakeClient()
     app._client = client  # type: ignore[assignment]
+    app._chat_session_id = "chat-1"
     app._incident_id = "incident-1"
     app._proposal_id = "proposal-1"
     app._awaiting_approval = True
     app._can_apply = True
     app._append_text = lambda content, style="": None  # type: ignore[method-assign]
+    app._update_prompt = lambda: None  # type: ignore[method-assign]
 
-    await app._handle_submission("/approve")
+    await app._handle_submission(legacy_command)
 
-    assert client.commands == [
-        (
-            "incident.decide",
-            {
-                "incident_id": "incident-1",
-                "proposal_id": "proposal-1",
-                "decision": "approve",
-                "run_smoke": False,
-            },
-        )
-    ]
+    assert client.commands[0] == (
+        "session.send_message",
+        {"session_id": "chat-1", "content": legacy_command},
+    )
+    assert all(method != "incident.decide" for method, _params in client.commands)
+    assert all(method != "job.cancel" for method, _params in client.commands)
 
 
 # 功能：验证 /monitor 预览确认后复用现有 job.start 且只展示环境覆盖项
@@ -546,10 +797,35 @@ async def test_monitor_preview_and_start_use_existing_job_rpc(tmp_path: Path) ->
     assert app._job_id == "job-new"
 
 
-# 功能：验证 /monitor 会跳过历史任务选择器和 unresolved Incident，而不是形成死路
-# 设计：在真实 Textual DOM 中模拟选择器等待状态，断言本地模式切换并解除等待
-async def test_monitor_skips_historical_job_selection(tmp_path: Path) -> None:
-    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-old", workspace_root=tmp_path)
+# 功能：验证多个历史任务不会在启动时挂载阻塞输入的选择器
+# 设计：以假 job.list 返回两个 unresolved 任务，检查提示、空附着状态和输入框焦点
+async def test_multiple_historical_jobs_keep_prompt_available(tmp_path: Path) -> None:
+    class _FakeClient:
+        # 返回两个仍可恢复的历史任务
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            assert method == "job.list"
+            return {
+                "jobs": [
+                    {
+                        "job": {
+                            "id": "job-1",
+                            "status": "failed",
+                            "updated_at": "2026-01-02T00:00:00Z",
+                        },
+                        "incident": {"status": "unresolved"},
+                    },
+                    {
+                        "job": {
+                            "id": "job-2",
+                            "status": "failed",
+                            "updated_at": "2026-01-01T00:00:00Z",
+                        },
+                        "incident": {"status": "awaiting_approval"},
+                    },
+                ]
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
 
     # 保持 TUI worker 存活但不连接 daemon
     async def _idle_connection() -> None:
@@ -558,19 +834,120 @@ async def test_monitor_skips_historical_job_selection(tmp_path: Path) -> None:
     app._connection_loop = _idle_connection  # type: ignore[method-assign]
 
     async with app.run_test() as pilot:
-        app._selection_in_progress = True
-        app._snapshot = {
-            "job": {"id": "job-old", "status": "failed"},
-            "incident": {"status": "unresolved"},
-        }
+        app._client = _FakeClient()  # type: ignore[assignment]
 
-        await app._handle_submission("/monitor")
+        await app._choose_job()
         await pilot.pause()
 
-        assert app._input_mode == "monitor"
+        assert app._job_id is None
         assert app._skip_job_restore
         assert not app._selection_in_progress
-        assert app._selection_ready.is_set()
+        assert not list(app.query("#job-picker"))
+        assert app.query_one("#prompt", ChatTextArea).has_focus
+
+
+# 功能：验证自动恢复不会附着其他工作区的唯一运行任务
+# 设计：返回一个带外部 workspace 的可恢复 Job，检查当前项目保持空闲且提示显式 /jobs
+async def test_single_foreign_job_does_not_auto_attach(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+
+    class _FakeClient:
+        # 返回另一个工作区中唯一的运行任务
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            assert method == "job.list"
+            return {
+                "jobs": [
+                    {
+                        "job": {
+                            "id": "job-foreign",
+                            "status": "running",
+                            "updated_at": "2026-01-02T00:00:00Z",
+                        },
+                        "workspace_root": str(foreign),
+                        "argv": [sys.executable, "train.py"],
+                    }
+                ]
+            }
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+    rendered: list[str] = []
+    app._client = _FakeClient()  # type: ignore[assignment]
+    app._append_text = (  # type: ignore[method-assign]
+        lambda content, style="": rendered.append(content)
+    )
+
+    await app._choose_job()
+
+    assert app._job_id is None
+    assert app._skip_job_restore
+    assert rendered == [
+        "No active or pending job in this workspace. "
+        "Type /monitor to start one or /jobs to attach another workspace."
+    ]
+
+
+# 功能：验证 /jobs 显式打开历史任务选择器并在确认后附着所选 Job
+# 设计：让命令处理协程等待真实 OptionList 选择，再检查订阅和快照刷新链路
+async def test_jobs_command_attaches_selected_historical_job(tmp_path: Path) -> None:
+    class _FakeClient:
+        # 初始化命令记录
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, dict[str, Any]]] = []
+
+        # 返回两个历史任务并支持选中后的订阅和快照读取
+        async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            self.commands.append((method, params))
+            if method == "job.list":
+                return {
+                    "jobs": [
+                        {
+                            "job": {
+                                "id": "job-newer",
+                                "status": "failed",
+                                "updated_at": "2026-01-02T00:00:00Z",
+                            },
+                            "incident": {"status": "unresolved"},
+                        },
+                        {
+                            "job": {
+                                "id": "job-older",
+                                "status": "failed",
+                                "updated_at": "2026-01-01T00:00:00Z",
+                            },
+                            "incident": {"status": "unresolved"},
+                        },
+                    ]
+                }
+            if method == "job.get":
+                return {
+                    "job": {"id": "job-newer", "status": "failed"},
+                    "incident": {"status": "unresolved"},
+                }
+            return {"subscription_id": "sub-job"}
+
+    app = CyanTuiApp("127.0.0.1", 7437, workspace_root=tmp_path)
+
+    # 保持 TUI worker 存活但不连接 daemon
+    async def _idle_connection() -> None:
+        await asyncio.Event().wait()
+
+    app._connection_loop = _idle_connection  # type: ignore[method-assign]
+    client = _FakeClient()
+
+    async with app.run_test() as pilot:
+        app._client = client  # type: ignore[assignment]
+        selection = asyncio.create_task(app._handle_submission("/jobs"))
+        await pilot.pause()
+
+        assert app.query_one("#job-picker", ContextActionSelect).has_focus
+        await pilot.press("enter")
+        await selection
+        await pilot.pause()
+
+        assert app._job_id == "job-newer"
+        assert any(method == "event.subscribe" for method, _params in client.commands)
+        assert any(method == "job.get" for method, _params in client.commands)
 
 
 # 功能：验证真实运行中的训练仍会阻止同一 TUI 启动第二个前台 Job
@@ -588,7 +965,7 @@ async def test_monitor_still_blocks_running_training() -> None:
     assert app._input_mode == "chat"
     assert rendered == [
         "The attached training process is still running. "
-        "Use /cancel-job before starting another."
+        "Use the Cancel training process action before starting another."
     ]
 
 

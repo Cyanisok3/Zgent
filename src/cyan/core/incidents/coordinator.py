@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import sys
 import uuid
 from collections.abc import Coroutine
@@ -55,7 +56,7 @@ from cyan.core.processes import terminate_owned_process_group
 from cyan.core.runner import RunProfile
 from cyan.core.runs import new_run_id
 from cyan.core.session import Session, SessionManager
-from cyan.core.tools.builtin import SearchTextTool
+from cyan.core.tools.builtin import ReadFileTool, SearchTextTool
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,56 @@ _RECOVERY_UNCERTAIN_STATUSES: frozenset[IncidentStatus] = frozenset(
         "smoke_skipped",
     }
 )
+_WORKSPACE_REFERENCE = re.compile(
+    r"^(?P<identity>.+@sha256:[0-9a-f]{64})#L"
+    r"(?P<start>[1-9][0-9]*)(?:-L(?P<end>[1-9][0-9]*))?$"
+)
+_LOG_REFERENCE = re.compile(
+    r"^(?P<identity>(?:stdout|stderr):[^/]+/[^@]+@bytes:)"
+    r"(?P<start>[0-9]+)-(?P<end>[0-9]+)$"
+)
 
 
 # 返回当前 UTC 时间
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# 将支持的 evidence reference 拆成稳定身份和闭区间
+def _reference_range(reference: str) -> tuple[str, int, int] | None:
+    for pattern in (_WORKSPACE_REFERENCE, _LOG_REFERENCE):
+        match = pattern.fullmatch(reference)
+        if match is None:
+            continue
+        start = int(match.group("start"))
+        end_group = match.group("end")
+        end = int(end_group) if end_group is not None else start
+        if end < start:
+            return None
+        return match.group("identity"), start, end
+    return None
+
+
+# 接受已观察引用本身或其同源子范围，拒绝扩大和身份替换
+def _reference_was_observed(reference: str, observed: set[str]) -> bool:
+    if reference in observed:
+        return True
+    requested = _reference_range(reference)
+    if requested is None:
+        return False
+    identity, start, end = requested
+    for item in observed:
+        registered = _reference_range(item)
+        if registered is None:
+            continue
+        observed_identity, observed_start, observed_end = registered
+        if (
+            identity == observed_identity
+            and observed_start <= start
+            and end <= observed_end
+        ):
+            return True
+    return False
 
 
 # 计算文件 SHA-256；不存在时按空内容计算
@@ -556,7 +602,7 @@ class IncidentCoordinator:
 
         # 只接受本轮工具实际返回或 failure capsule 明确给出的引用
         def validate_evidence(evidence: EvidenceRef) -> str | None:
-            if evidence.reference not in evidence_refs:
+            if not _reference_was_observed(evidence.reference, evidence_refs):
                 return f"evidence reference was not observed: {evidence.reference}"
             if evidence.source in ("stdout", "stderr"):
                 if not evidence.reference.startswith(f"{evidence.source}:"):
@@ -570,11 +616,22 @@ class IncidentCoordinator:
             "This is incident response, not metric optimization or experiment research.\n"
             "You may inspect only the supplied workspace and this incident's immutable logs. "
             "Never claim a command ran, never modify the workspace, and never optimize loss or "
-            "accuracy. First call submit_diagnosis exactly once with concrete evidence. Log "
-            "evidence must cite references returned by read_job_log; workspace evidence must "
-            "cite path@sha256#line references returned by read/search tools. If and only if a "
-            "small source or config change directly fixes the crash, then call propose_patch "
-            "with a unified diff and the diagnosis id. Otherwise stop after diagnosis.\n"
+            "accuracy. Start from the failure capsule and traceback, then use targeted log search "
+            "and small source reads only as needed. As soon as the evidence is sufficient, call "
+            "submit_diagnosis exactly once before considering a patch. Log evidence must cite "
+            "references returned by read_job_log; workspace evidence must cite path@sha256#line "
+            "references returned by read/search tools. If the crash is fully caused by an invalid "
+            "launch argument, missing external path or data, or the host environment, stop after "
+            "diagnosis and tell the user what to change; do not add validation or fallback code. "
+            "Otherwise propose a patch only when one minimal source or config edit directly fixes "
+            "the observed crash. Modify only the causal call site; do not harden similar sites, "
+            "refactor, or make unrelated improvements. Then call propose_patch with one relative "
+            "file path and one exact SEARCH/REPLACE pair. Copy the smallest "
+            "unique contiguous SEARCH text verbatim from read_file or search_text output; do not "
+            "write diff headers, hunks, or line numbers. If exact matching fails, use the returned "
+            "real source feedback to correct the proposal once. If the corrected proposal still "
+            "fails, keep the diagnosis and stop proposing a patch. "
+            "A diagnosis without a patch is valid.\n"
             f"Failure capsule:\n{capsule.model_dump_json(indent=2)}\n"
             f"Default stderr reference: {stderr_reference}\n"
             f"Default stdout reference: {stdout_reference}\n"
@@ -592,6 +649,12 @@ class IncidentCoordinator:
                 "propose_patch",
             ],
             extra_tools=[
+                ReadFileTool(
+                    root,
+                    evidence_refs=evidence_refs,
+                    max_bytes=64 * 1024,
+                    text_only=True,
+                ),
                 SearchTextTool(root, evidence_refs=evidence_refs),
                 ReadJobLogTool(reader, evidence_refs=evidence_refs),
                 SubmitDiagnosisTool(
@@ -604,6 +667,9 @@ class IncidentCoordinator:
                     incident.id,
                     root,
                     evidence_validator=validate_evidence,
+                    patch_service=(
+                        PatchService(root) if capsule.git_head is not None else None
+                    ),
                 ),
             ],
             max_steps=12,
@@ -704,6 +770,31 @@ class IncidentCoordinator:
     # 返回按更新时间排序的精简 Job 列表
     async def list_jobs(self) -> list[dict[str, Any]]:
         return [await self.job_view(job.id) for job in self._jobs.list_jobs()]
+
+    # 返回当前待审批单文件 proposal 的不可变审阅文本
+    def review_proposal(
+        self,
+        job_id: str,
+        incident_id: str,
+        proposal_id: str,
+    ) -> tuple[str, str, str]:
+        spec = self._jobs.read_spec(job_id)
+        store = self._store_for_job(job_id)
+        incident = store.read_incident(incident_id)
+        if incident.job_id != job_id:
+            raise ValueError("incident belongs to another job")
+        if incident.status != "awaiting_approval":
+            raise ValueError("incident is not awaiting approval")
+        if incident.active_proposal_id != proposal_id:
+            raise ValueError("proposal is not active")
+        proposal = store.read_proposal(incident_id)
+        if proposal.id != proposal_id:
+            raise ValueError("proposal id mismatch")
+        before, after = PatchService(spec.workspace_root).review(
+            proposal,
+            store.patch_path(proposal),
+        )
+        return proposal.files[0].path, before, after
 
     # 校验 proposal 后应用补丁，按用户选择执行 smoke，再启动完整原命令
     async def decide(

@@ -38,7 +38,15 @@ def main() -> None:
 
     core_parser = subparsers.add_parser("core")
     core_sub = core_parser.add_subparsers(dest="core_command")
-    core_sub.add_parser("start", help="Start the daemon in the background")
+    core_start_parser = core_sub.add_parser(
+        "start",
+        help="Start the daemon in the background",
+    )
+    core_start_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable connection data",
+    )
     core_sub.add_parser("stop", help="Stop the running daemon")
     core_sub.add_parser("status", help="Show daemon status")
 
@@ -73,7 +81,7 @@ def main() -> None:
         cmd_watch(argv, config)
     elif args.command == "core":
         if args.core_command == "start":
-            cmd_core_start(config)
+            cmd_core_start(config, json_output=args.json)
         elif args.core_command == "stop":
             cmd_core_stop(config)
         elif args.core_command == "status":

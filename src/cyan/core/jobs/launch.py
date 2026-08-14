@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import shlex
 import shutil
@@ -115,25 +118,75 @@ def _config_paths(argv: list[str], workspace_root: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
-# 解析训练命令并在合并后的 PATH 中解析真实可执行文件
+# 在工作区和合并后的 PATH 中解析真实可执行文件
+def _resolve_executable(
+    value: str,
+    workspace_root: Path,
+    environment: Mapping[str, str],
+) -> str:
+    if "/" in value:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = workspace_root / path
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise LaunchParseError(f"executable not found: {value}")
+        return str(path.resolve())
+    executable = shutil.which(value, path=environment.get("PATH"))
+    if executable is None:
+        raise LaunchParseError(f"executable not found: {value}")
+    return str(Path(executable).resolve(strict=False))
+
+
+# 解析训练命令并生成确定性的启动字段
 def parse_training_command(
     command: str,
     workspace_root: Path,
     base_env: Mapping[str, str],
 ) -> ParsedLaunch:
+    root = workspace_root.expanduser().resolve(strict=True)
+    if not root.is_dir():
+        raise LaunchParseError("workspace_root must be a directory")
     tokens = _split_command(command)
     overrides, argv = _extract_env(tokens)
-    environment = dict(base_env)
-    environment.update(overrides)
-    executable = shutil.which(argv[0], path=environment.get("PATH"))
-    if executable is None:
-        raise LaunchParseError(f"executable not found: {argv[0]}")
+    environment = build_launch_environment(overrides, base_env)
     return ParsedLaunch(
         argv=tuple(argv),
         env_overrides=overrides,
-        executable=str(Path(executable).resolve(strict=False)),
-        config_paths=_config_paths(argv, workspace_root),
+        executable=_resolve_executable(argv[0], root, environment),
+        config_paths=_config_paths(argv, root),
     )
+
+
+# 合并调用方环境与命令前置覆盖项
+def build_launch_environment(
+    env_overrides: Mapping[str, str],
+    base_env: Mapping[str, str],
+) -> dict[str, str]:
+    environment = dict(base_env)
+    environment.update(env_overrides)
+    return environment
+
+
+# 对完整 LaunchSpec 输入生成不可逆的稳定指纹
+def launch_fingerprint(
+    launch: ParsedLaunch,
+    workspace_root: Path,
+    base_env: Mapping[str, str],
+) -> str:
+    payload = {
+        "argv": list(launch.argv),
+        "cwd": str(workspace_root.expanduser().resolve(strict=True)),
+        "env": build_launch_environment(launch.env_overrides, base_env),
+        "executable": launch.executable,
+        "config_paths": list(launch.config_paths),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 # 生成不包含继承环境的启动预览文本

@@ -21,18 +21,22 @@ For every behavior change, define the observable outcome and verify it with the 
 test. Incident integration tests must use real temporary Git repositories and real subprocesses;
 never fake a frontend result.
 
+Root documentation describes the current product only. Replace stale results and commands instead
+of appending version-by-version narratives; keep historical migration notes out of the root.
+
 ## Product boundary
 
 cyan is a local ML-training Incident Agent, not an AutoResearch system.
 
 - During training, the daemon only supervises the real process and persists stdout/stderr.
 - A non-zero exit or unexpected signal creates a failure capsule and wakes a fresh read-only Agent.
-- The Agent may diagnose a crash and propose a diff, but it cannot write the workspace or run shell.
+- The Agent may diagnose a crash and propose one exact single-file SEARCH/REPLACE, but it cannot
+  write the workspace, generate executable diff syntax, or run shell.
 - One explicit approval lets the harness validate and apply that proposal.
 - A user-declared smoke verifier is optional; the original command is always the final verifier.
 - v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
 
-The product surface is the TUI. Normal users need only:
+The default product surface is the TUI. Normal users need only:
 
 ```bash
 cyan
@@ -44,14 +48,23 @@ development diagnostics and must not complicate the primary help. `/monitor` is 
 the harness parses and previews the command without an Agent or shell, then reuses `job.start`.
 Typing `/` must show keyboard-selectable local commands and ordinary chat skills. Ordinary chat
 permission requests use the existing `permission.*` events and `permission.respond`; this must not
-broaden the read-only Incident profile.
+broaden the read-only Incident profile. Patch approval, rejection, and running-job cancellation are
+contextual TUI selectors, not slash commands or global single-key bindings. Multiple recoverable
+Jobs must not block the chat prompt; `/jobs` opens their selector explicitly.
+
+`vscode/` is an optional thin local client. It may provide native Quick Input, Tree View,
+Pseudoterminal, Markdown, and `vscode.diff` surfaces, but it must not reimplement launch parsing,
+Incident state, patch application, or retries in TypeScript. It stores only the attached Job ID;
+daemon snapshots remain authoritative. The Alpha supports one trusted local macOS/Linux workspace
+and an installed `cyan`; do not add bundled runtimes, downloads, Webviews, chat, remote workspaces,
+or Marketplace concerns without a separate product decision.
 
 ## Architecture
 
 cyan is a dual-process local system:
 
 ```text
-cyan / cyan-tui
+cyan / cyan-tui / cyan VS Code
     │ TCP loopback, NDJSON framing, JSON-RPC 2.0 commands
 cyan-core
     ├── JobSupervisor
@@ -106,15 +119,19 @@ Do not register write, shell, MCP, Skill, TaskManager, or subagent tools for Inc
 Do not load global/project context or session notes, and do not let slash commands or manual
 compaction override this profile. v1 must not start configured MCP servers.
 
-`propose_patch` writes an artifact only. `PatchService` owns hash checks, path checks,
-`git apply --check`, application, and safe reverse application.
+`propose_patch` requires matching workspace evidence, performs one exact unique replacement in
+memory, and writes the harness-generated diff as an artifact only. v1 edits one existing UTF-8 text
+file of at most 1 MiB; it does not create, delete, rename, or fuzzily match files. `PatchService`
+owns hash checks, path checks, `git apply --check`, application, and safe reverse application.
 
 ### Events and logs
 
 Raw process output is written only to attempt log files. The TUI reads it by byte cursor; never send
-each log line through EventBus. Incident `events.jsonl` omits per-token events and full tool output.
-IPC subscriptions use bounded per-client queues so slow clients cannot block process output.
-Daemon trace must summarize, rather than copy, logs, patches, tool I/O, token text, and user text.
+each log line through EventBus. When attaching an existing Attempt, the TUI shows a bounded log tail
+and continues from that byte cursor; complete logs remain on disk. Incident `events.jsonl` omits
+per-token events and full tool output. IPC subscriptions use bounded per-client queues so slow
+clients cannot block process output. Daemon trace must summarize, rather than copy, logs, patches,
+tool I/O, token text, and user text.
 
 ### Sessions
 
@@ -124,7 +141,9 @@ Job and Incident session. An Incident follow-up must reuse its read-only profile
 ### Configuration
 
 Priority is defaults, `~/.cyan/config.toml`, project `.cyan/config.toml`, `.env`, then environment
-variables. Relevant prefixes are `CYAN_*`. The optional smoke declaration is:
+variables. Relevant prefixes are `CYAN_*`. Daemon configuration is resolved once from its startup
+directory; switching workspaces does not reload it. The optional smoke declaration is loaded from
+each Job workspace:
 
 ```toml
 [incident.smoke]
@@ -148,6 +167,11 @@ uv run pytest tests/unit -v
 uv run pytest tests/integration -v
 uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
+cd vscode
+npm run lint
+npm run test:unit
+npm run test:extension
+npm run package
 ```
 
 ## Code style
@@ -170,3 +194,6 @@ async def test_publish_reaches_subscriber() -> None:
 ```
 
 Do not add multi-line function docstrings in place of these comments.
+
+TypeScript functions and class methods follow the same concise Chinese-comment rule. TypeScript
+tests use two Chinese comment lines immediately above each `test(...)`.

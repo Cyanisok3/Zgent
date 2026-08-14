@@ -6,6 +6,8 @@ import fcntl
 import fnmatch
 import json
 import logging
+import os
+import secrets
 import signal
 import time
 from collections.abc import Coroutine
@@ -17,6 +19,7 @@ from pydantic import BaseModel
 
 import cyan
 from cyan.core.bus.commands import (
+    WIRE_PROTOCOL_VERSION,
     AgentRunCommand,
     AgentRunResult,
     CoreShutdownCommand,
@@ -25,6 +28,8 @@ from cyan.core.bus.commands import (
     EventSubscribeResult,
     IncidentDecideCommand,
     IncidentDecideResult,
+    IncidentReviewCommand,
+    IncidentReviewResult,
     JobCancelCommand,
     JobCancelResult,
     JobGetCommand,
@@ -35,6 +40,10 @@ from cyan.core.bus.commands import (
     JobReadLogResult,
     JobStartCommand,
     JobStartResult,
+    LaunchPreviewCommand,
+    LaunchPreviewResult,
+    LaunchStartCommand,
+    LaunchStartResult,
     PermissionRespondCommand,
     PermissionRespondResult,
     PongResult,
@@ -63,6 +72,12 @@ from cyan.core.jobs import (
     JobStore,
     JobSupervisor,
 )
+from cyan.core.jobs.launch import (
+    LaunchParseError,
+    build_launch_environment,
+    launch_fingerprint,
+    parse_training_command,
+)
 from cyan.core.jobs.models import JobEventType
 from cyan.core.llm.provider import AnthropicProvider
 from cyan.core.logging_setup import setup_logging
@@ -82,6 +97,7 @@ logger = logging.getLogger(__name__)
 JOB_NOT_FOUND = -32030
 INCIDENT_DECISION_FAILED = -32031
 CORE_SHUTTING_DOWN = -32032
+INCIDENT_REVIEW_FAILED = -32033
 
 
 def _now() -> str:
@@ -151,6 +167,7 @@ def _config_log_data(config: CyanConfig) -> dict[str, Any]:
 class CoreApp:
     def __init__(self) -> None:
         self._start_time = time.monotonic()
+        self._startup_workspace_root = Path.cwd().resolve()
         self._bus = EventBus()
         self._broadcaster: IpcEventBroadcaster | None = None
         self._trace: TraceWriter | None = None
@@ -167,17 +184,32 @@ class CoreApp:
         self._server: SocketServer | None = None
         self._job_start_lock = asyncio.Lock()
         self._shutting_down = False
+        self._startup_ready = False
 
     # 获取进程级排他锁，阻止第二个 daemon 在端口检查前修改恢复状态
     def _acquire_daemon_lock(self) -> None:
         path = Path("~/.cyan/cyan-core.lock").expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         lock = path.open("a+", encoding="utf-8")
+        os.fchmod(lock.fileno(), 0o600)
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             lock.close()
             raise SystemExit("cyan-core is already running") from None
+        assert self._config is not None
+        metadata = {
+            "host": self._config.host,
+            "port": self._config.port,
+            "workspace_root": str(self._startup_workspace_root),
+            "pid": os.getpid(),
+            "protocol_version": WIRE_PROTOCOL_VERSION,
+        }
+        lock.seek(0)
+        lock.truncate()
+        lock.write(json.dumps(metadata, separators=(",", ":"), sort_keys=True))
+        lock.flush()
+        os.fsync(lock.fileno())
         self._daemon_lock = lock
 
     # 处理 core.ping 请求，返回服务版本、运行时长和接收时间
@@ -186,6 +218,8 @@ class CoreApp:
         logger.debug("ping from %s", client)
         return PongResult(
             server_version=cyan.__version__,
+            protocol_version=WIRE_PROTOCOL_VERSION,
+            startup_workspace_root=str(self._startup_workspace_root),
             uptime_ms=int((time.monotonic() - self._start_time) * 1000),
             received_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
@@ -262,10 +296,9 @@ class CoreApp:
         assert self._incidents is not None
         return self._incidents.profile_for_session(session)
 
-    # 创建真实后台进程 Job 并立即返回其标识
-    async def _job_start_handler(self, params: dict[str, Any]) -> JobStartResult:
+    # 在唯一启动锁内创建真实后台进程 Job
+    async def _start_job(self, cmd: JobStartCommand) -> JobStartResult:
         assert self._job_supervisor is not None
-        cmd = JobStartCommand.model_validate(params)
         root = Path(cmd.workspace_root).expanduser()
         if not root.is_absolute():
             raise HandlerError(-32602, "workspace_root must be absolute")
@@ -285,6 +318,54 @@ class CoreApp:
             self._running_runs.add(task)
             task.add_done_callback(self._running_runs.discard)
             return JobStartResult(job_id=job.id)
+
+    # 校验公开 job.start 参数后复用唯一训练启动边界
+    async def _job_start_handler(self, params: dict[str, Any]) -> JobStartResult:
+        return await self._start_job(JobStartCommand.model_validate(params))
+
+    # 解析训练命令并返回不含继承环境的确定性预览
+    async def _launch_preview_handler(
+        self,
+        params: dict[str, Any],
+    ) -> LaunchPreviewResult:
+        cmd = LaunchPreviewCommand.model_validate(params)
+        root = Path(cmd.workspace_root).expanduser()
+        try:
+            launch = parse_training_command(cmd.command, root, cmd.env)
+            fingerprint = launch_fingerprint(launch, root, cmd.env)
+        except (LaunchParseError, OSError, ValueError) as exc:
+            raise HandlerError(-32602, str(exc)) from exc
+        return LaunchPreviewResult(
+            argv=list(launch.argv),
+            cwd=str(root.resolve(strict=True)),
+            env_overrides=launch.env_overrides,
+            executable=launch.executable,
+            config_paths=list(launch.config_paths),
+            fingerprint=fingerprint,
+        )
+
+    # 重新解析已确认命令并在指纹一致时启动真实训练
+    async def _launch_start_handler(
+        self,
+        params: dict[str, Any],
+    ) -> LaunchStartResult:
+        cmd = LaunchStartCommand.model_validate(params)
+        root = Path(cmd.workspace_root).expanduser()
+        try:
+            launch = parse_training_command(cmd.command, root, cmd.env)
+            fingerprint = launch_fingerprint(launch, root, cmd.env)
+        except (LaunchParseError, OSError, ValueError) as exc:
+            raise HandlerError(-32602, str(exc)) from exc
+        if not secrets.compare_digest(fingerprint, cmd.preview_fingerprint):
+            raise HandlerError(-32602, "launch preview is stale; preview the command again")
+        result = await self._start_job(
+            JobStartCommand(
+                argv=list(launch.argv),
+                workspace_root=str(root.resolve(strict=True)),
+                env=build_launch_environment(launch.env_overrides, cmd.env),
+            )
+        )
+        return LaunchStartResult(job_id=result.job_id)
 
     # 将指定 Attempt 最新的持久化状态转换后发布到实时事件流
     async def _publish_latest_job_event(
@@ -364,6 +445,7 @@ class CoreApp:
         return JobReadLogResult(
             data=chunk.text,
             next_offset=chunk.end_offset,
+            total_bytes=chunk.total_bytes,
             eof=chunk.eof,
         )
 
@@ -385,6 +467,28 @@ class CoreApp:
         except (KeyError, OSError, ValueError) as exc:
             raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
         return IncidentDecideResult(status=status)
+
+    # 返回当前待审批 proposal 的只读前后文本
+    async def _incident_review_handler(
+        self,
+        params: dict[str, Any],
+    ) -> IncidentReviewResult:
+        cmd = IncidentReviewCommand.model_validate(params)
+        assert self._incidents is not None
+        try:
+            path, before, after = self._incidents.review_proposal(
+                cmd.job_id,
+                cmd.incident_id,
+                cmd.proposal_id,
+            )
+        except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
+            raise HandlerError(INCIDENT_REVIEW_FAILED, str(exc)) from exc
+        return IncidentReviewResult(
+            proposal_id=cmd.proposal_id,
+            path=path,
+            before_text=before,
+            after_text=after,
+        )
 
     # 向 session 发送一条用户消息，后台执行并立即返回可订阅的 run_id
     async def _session_send_handler(self, params: dict[str, Any]) -> SessionSendMessageResult:
@@ -660,13 +764,17 @@ class CoreApp:
         server.register("permission.respond", self._permission_respond_handler)
         server.register("session.compact", self._session_compact_handler)
         server.register("job.start", self._job_start_handler)
+        server.register("launch.preview", self._launch_preview_handler)
+        server.register("launch.start", self._launch_start_handler)
         server.register("job.list", self._job_list_handler)
         server.register("job.get", self._job_get_handler)
         server.register("job.cancel", self._job_cancel_handler)
         server.register("job.read_log", self._job_read_log_handler)
         server.register("incident.decide", self._incident_decide_handler)
+        server.register("incident.review", self._incident_review_handler)
 
         addr = await server.start()
+        self._startup_ready = True
         logger.info("cyan-core %s listening addr=%s", cyan.__version__, addr)
         logger.info("config: %s", _config_log_data(self._config))
 
@@ -706,6 +814,9 @@ class CoreApp:
         if self._trace is not None:
             await self._trace.stop()
         if self._daemon_lock is not None:
+            self._daemon_lock.seek(0)
+            self._daemon_lock.truncate()
+            self._daemon_lock.flush()
             fcntl.flock(self._daemon_lock.fileno(), fcntl.LOCK_UN)
             self._daemon_lock.close()
             self._daemon_lock = None
@@ -714,4 +825,10 @@ class CoreApp:
 
 # 同步入口：启动 CoreApp 事件循环
 def run() -> None:
-    asyncio.run(CoreApp().run())
+    app = CoreApp()
+    try:
+        asyncio.run(app.run())
+    except (Exception, SystemExit) as exc:
+        if not app._startup_ready:
+            logger.error("cyan-core startup failed: %s", exc)
+        raise

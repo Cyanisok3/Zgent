@@ -30,6 +30,8 @@ async def test_ping_returns_pong(
     assert resp["id"] == "test-1"
     assert "result" in resp
     assert resp["result"]["server_version"] == "0.0.1"
+    assert resp["result"]["protocol_version"] == 1
+    assert resp["result"]["startup_workspace_root"]
     assert resp["result"]["uptime_ms"] >= 0
     assert "received_at" in resp["result"]
 

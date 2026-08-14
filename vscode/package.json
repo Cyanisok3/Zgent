@@ -1,0 +1,197 @@
+{
+  "name": "cyan-vscode",
+  "displayName": "cyan",
+  "description": "Thin VS Code client for the cyan ML training Incident Agent",
+  "version": "0.0.1",
+  "publisher": "cyan-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:cyan.training",
+    "onCommand:cyan.startTraining",
+    "onCommand:cyan.attachJob"
+  ],
+  "main": "./dist/src/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "cyan starts workspace training code and may apply an explicitly approved patch."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "configuration": {
+      "title": "cyan",
+      "properties": {
+        "cyan.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the installed cyan executable. Empty uses cyan from PATH.",
+          "scope": "machine"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cyan",
+          "title": "cyan",
+          "icon": "media/cyan.svg"
+        }
+      ]
+    },
+    "views": {
+      "cyan": [
+        {
+          "id": "cyan.training",
+          "name": "Training Incident"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "cyan.training",
+        "contents": "Start a real training process under cyan supervision.\n[Start monitored training](command:cyan.startTraining)",
+        "when": "cyan.connected && cyan.hasJob == false"
+      },
+      {
+        "view": "cyan.training",
+        "contents": "cyan core is not connected.\n[Reconnect](command:cyan.reconnect)",
+        "when": "cyan.connected == false"
+      }
+    ],
+    "commands": [
+      {
+        "command": "cyan.startTraining",
+        "title": "Cyan: Start Monitored Training",
+        "icon": "$(play)"
+      },
+      {
+        "command": "cyan.attachJob",
+        "title": "Cyan: Attach to Job"
+      },
+      {
+        "command": "cyan.showLog",
+        "title": "Cyan: Show Training Log",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "cyan.openDiagnosis",
+        "title": "Cyan: Open Diagnosis"
+      },
+      {
+        "command": "cyan.reviewProposal",
+        "title": "Cyan: Review Proposed Fix",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "cyan.approveProposal",
+        "title": "Cyan: Approve Proposed Fix",
+        "icon": "$(check)"
+      },
+      {
+        "command": "cyan.rejectProposal",
+        "title": "Cyan: Reject Proposed Fix",
+        "icon": "$(close)"
+      },
+      {
+        "command": "cyan.cancelJob",
+        "title": "Cyan: Cancel Training",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "cyan.refresh",
+        "title": "Cyan: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cyan.reconnect",
+        "title": "Cyan: Reconnect Core"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "cyan.openDiagnosis",
+          "when": "false"
+        },
+        {
+          "command": "cyan.reviewProposal",
+          "when": "false"
+        },
+        {
+          "command": "cyan.approveProposal",
+          "when": "false"
+        },
+        {
+          "command": "cyan.rejectProposal",
+          "when": "false"
+        },
+        {
+          "command": "cyan.cancelJob",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "cyan.startTraining",
+          "when": "view == cyan.training && cyan.connected && cyan.canStart",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cyan.refresh",
+          "when": "view == cyan.training && cyan.connected",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cyan.showLog",
+          "when": "view == cyan.training && viewItem =~ /^cyan\\.job/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cyan.cancelJob",
+          "when": "view == cyan.training && viewItem == cyan.job.running",
+          "group": "inline@2"
+        },
+        {
+          "command": "cyan.reviewProposal",
+          "when": "view == cyan.training && viewItem =~ /^cyan\\.proposal/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cyan.approveProposal",
+          "when": "view == cyan.training && viewItem == cyan.proposal.applicable",
+          "group": "inline@2"
+        },
+        {
+          "command": "cyan.rejectProposal",
+          "when": "view == cyan.training && viewItem =~ /^cyan\\.proposal\\.(applicable|reviewOnly)$/",
+          "group": "inline@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run check",
+    "test:unit": "npm run compile && node --test dist/test/*.test.js",
+    "test:extension": "npm run compile && node dist/test/runTest.js",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.7.0"
+  }
+}

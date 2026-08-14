@@ -14,31 +14,29 @@ from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from cyan.core.skills.loader import SkillLoader
-from cyan.core.transport.socket_client import IpcError, SocketClient
-from cyan.tui.launch import (
+from cyan.core.jobs.launch import (
     LaunchParseError,
     ParsedLaunch,
     format_launch_preview,
     parse_training_command,
 )
+from cyan.core.skills.loader import SkillLoader
+from cyan.core.transport.socket_client import IpcError, SocketClient
 
 _LOCAL_SLASH_COMMANDS = (
     ("monitor", "enter ML training monitor mode"),
     ("start", "launch the reviewed training command"),
+    ("jobs", "choose a running or pending training job"),
     ("incident", "send a follow-up to the read-only Incident Agent"),
-    ("approve", "approve the patch and configured smoke verifier"),
-    ("approve-no-smoke", "approve the patch without optional smoke"),
-    ("reject", "reject the current patch"),
-    ("cancel-job", "cancel the running training process"),
     ("help", "show local TUI commands"),
 )
+_LOG_READ_BYTES = 32 * 1024
 _ACTIVE_JOB_STATUSES = {"starting", "running"}
 _ACTIVE_INCIDENT_STATUSES = {
     "diagnosing",
@@ -105,14 +103,14 @@ def _actionable_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-# 根据已冻结的 smoke verifier 配置展示实际命令、超时和审批选项
-def _approval_hint(
+# 根据 proposal 能力和 smoke 配置生成当前可执行的审批选项
+def _incident_action_choices(
     smoke_config: dict[str, Any] | None,
     *,
     can_apply: bool = True,
-) -> str:
+) -> list[tuple[str, str]]:
     if not can_apply:
-        return "Non-Git workspace: patch is review-only. Type /reject."
+        return [("reject", "Reject review-only patch")]
     if smoke_config:
         argv = smoke_config.get("argv", [])
         command = (
@@ -121,19 +119,26 @@ def _approval_hint(
             else str(argv)
         )
         timeout = smoke_config.get("timeout_s", 300)
-        return (
-            f"Smoke verifier before full retry:\n$ {command}\n"
-            f"timeout={timeout}s\n"
-            "/approve  ·  /approve-no-smoke  ·  /reject"
-        )
-    return "/approve  ·  /reject"
+        return [
+            (
+                "approve-smoke",
+                f"Approve and run smoke: {command} (timeout={timeout}s)",
+            ),
+            ("approve", "Approve without smoke"),
+            ("reject", "Reject patch"),
+        ]
+    return [
+        ("approve", "Approve and rerun original command"),
+        ("reject", "Reject patch"),
+    ]
 
 
-# 兼容日志 RPC 字段并返回文本、下一字节位置和 EOF
-def _log_result(result: dict[str, Any]) -> tuple[str, int, bool]:
+# 读取日志 RPC 的文本、下一字节位置、总字节数和 EOF
+def _log_result(result: dict[str, Any]) -> tuple[str, int, int, bool]:
     data = str(result.get("data", result.get("text", "")))
     next_offset = int(result.get("next_offset", result.get("end_offset", 0)))
-    return data, next_offset, bool(result.get("eof", False))
+    total_bytes = int(result["total_bytes"])
+    return data, next_offset, total_bytes, bool(result.get("eof", False))
 
 
 # 将 Attempt 起止时间转换为稳定的短运行时长标签
@@ -206,6 +211,12 @@ def _job_label(entry: dict[str, Any]) -> str:
     status = str(record.get("status", "unknown"))
     cwd = f"  {workspace}" if workspace else ""
     return f"{status:10}  {job_id}  {command}{cwd}"
+
+
+# 判断任务启动目录是否与当前 TUI 工作区一致
+def _job_matches_workspace(entry: dict[str, Any], workspace_root: Path) -> bool:
+    _argv, workspace = _launch_fields(entry)
+    return bool(workspace) and Path(workspace).expanduser().resolve() == workspace_root
 
 
 class SlashCompleteWidget(Static):
@@ -457,6 +468,45 @@ class PermissionSelect(Static):
         self.post_message(self.Decided(self, self._tool_use_id, decision))
 
 
+class ContextActionSelect(OptionList):
+    """只在当前 Job 或 Incident 状态有效时展示的上下文动作选择器。"""
+
+    # 发布取消选择事件并保留由应用决定的控件生命周期
+    class Cancelled(Message):
+        # 保存被取消的选择器
+        def __init__(self, widget: ContextActionSelect) -> None:
+            self.widget = widget
+            super().__init__()
+
+    # 使用稳定动作标识构造可点击的纵向选择器
+    def __init__(
+        self,
+        choices: list[tuple[str, str]],
+        *,
+        id: str,
+        auto_focus: bool,
+    ) -> None:
+        super().__init__(
+            *[Option(escape(label), id=action) for action, label in choices],
+            id=id,
+            compact=True,
+        )
+        self.action_choices = tuple(choices)
+        self._auto_focus = auto_focus
+
+    # 仅审批和显式 Job 选择器挂载后主动取得焦点
+    def on_mount(self) -> None:
+        if self._auto_focus:
+            self.focus()
+
+    # Esc 只返回聊天输入，不隐式作出任何决定
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.Cancelled(self))
+
+
 class ChatTextArea(TextArea):
     """支持 Enter 提交和修饰键换行的统一多行输入框。"""
 
@@ -548,7 +598,16 @@ class CyanTuiApp(App[None]):
         scrollbar-size-vertical: 1;
     }
     #timeline Static { height: auto; padding: 0 0 1 0; }
-    #job-picker { height: auto; max-height: 16; margin: 1 0; }
+    #context-actions {
+        height: auto;
+        max-height: 18;
+        padding: 0 1;
+    }
+    #job-picker, #incident-actions, #job-actions {
+        height: auto;
+        max-height: 16;
+        margin: 1 0;
+    }
     #prompt {
         height: auto;
         min-height: 3;
@@ -583,6 +642,7 @@ class CyanTuiApp(App[None]):
         self._skip_job_restore = False
         self._attempt_id: str | None = None
         self._offsets = {"stdout": 0, "stderr": 0}
+        self._tail_logs_on_next_attempt = job_id is not None
         self._snapshot: dict[str, Any] = {}
         self._incident_id: str | None = None
         self._proposal_id: str | None = None
@@ -600,6 +660,7 @@ class CyanTuiApp(App[None]):
         self._smoke_config_fingerprint: str | None = None
         self._can_apply = True
         self._awaiting_approval = False
+        self._cancel_in_flight = False
         self._subscribed_run_ids: set[str] = set()
         self._visible_subagent_run_ids: set[str] = set()
         self._run_subscription_lock = asyncio.Lock()
@@ -622,6 +683,7 @@ class CyanTuiApp(App[None]):
             ),
             id="timeline",
         )
+        yield Vertical(id="context-actions")
         yield ChatTextArea("", id="prompt")
 
     # 挂载后启动唯一的连接与轮询 worker
@@ -731,7 +793,7 @@ class CyanTuiApp(App[None]):
         )
 
     # 切换附着目标时重置仅属于旧 Job 的事件和展示状态
-    def _select_job(self, job_id: str) -> None:
+    def _select_job(self, job_id: str, *, tail_logs: bool = True) -> None:
         if job_id != self._job_id:
             self._job_event_seq = 0
             self._attempt_id = None
@@ -744,45 +806,124 @@ class CyanTuiApp(App[None]):
             self._shown_proposal_id = None
             self._shown_smoke = None
             self._shown_incident_status = None
+            self._tail_logs_on_next_attempt = tail_logs
         self._job_id = job_id
         self._skip_job_restore = False
 
-    # 自动附着唯一任务，存在多个任务时显示极简选择器
-    async def _choose_job(self) -> None:
+    # 自动附着唯一任务，多个任务仅在用户显式请求时打开选择器
+    async def _choose_job(self, *, interactive: bool = False) -> None:
         if self._client is None:
             return
         result = await self._client.send_command("job.list", {})
         raw_jobs = result.get("jobs", [])
-        jobs = _actionable_jobs(
+        all_jobs = _actionable_jobs(
             [entry for entry in raw_jobs if isinstance(entry, dict)]
             if isinstance(raw_jobs, list)
             else []
         )
+        jobs = (
+            all_jobs
+            if interactive
+            else [
+                entry
+                for entry in all_jobs
+                if _job_matches_workspace(entry, self._workspace_root)
+            ]
+        )
         if not jobs:
-            self._append_text("No active or pending job. Type /monitor to start one.")
+            if all_jobs and not interactive:
+                self._skip_job_restore = True
+                self._append_text(
+                    "No active or pending job in this workspace. "
+                    "Type /monitor to start one or /jobs to attach another workspace.",
+                    style="dim cyan",
+                )
+            else:
+                self._append_text("No active or pending job. Type /monitor to start one.")
             return
         if len(jobs) == 1:
             self._select_job(str(_job_record(jobs[0]).get("id", "")))
             return
+        if not interactive:
+            self._skip_job_restore = True
+            self._append_text(
+                f"{len(jobs)} recoverable jobs found. Type /jobs to choose one.",
+                style="dim cyan",
+            )
+            self.query_one("#prompt", ChatTextArea).focus()
+            return
         options = [
-            Option(escape(_job_label(entry)), id=str(_job_record(entry).get("id", "")))
+            (str(_job_record(entry).get("id", "")), _job_label(entry))
             for entry in jobs
         ]
-        self._append_text("Choose a job to attach:")
         self._selection_ready.clear()
         self._selection_in_progress = True
-        self.query_one("#timeline", VerticalScroll).mount(
-            OptionList(*options, id="job-picker", compact=True)
+        self._append_text("Choose a job to attach:")
+        self._mount_context_actions(
+            "job-picker",
+            options,
+            auto_focus=True,
         )
         await self._selection_ready.wait()
         self._selection_in_progress = False
 
-    # 接收选择器结果并唤醒等待附着的 worker
+    # 接收 Job、Incident 和取消动作选择并路由到现有 RPC
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id:
+        widget_id = event.option_list.id
+        if widget_id == "job-picker" and event.option_id:
             self._select_job(event.option_id)
             self._selection_ready.set()
-        event.option_list.remove()
+            event.option_list.remove()
+            self.query_one("#prompt", ChatTextArea).focus()
+        elif widget_id == "incident-actions" and event.option_id:
+            event.option_list.disabled = True
+            action = event.option_id
+            decision = "reject" if action == "reject" else "approve"
+            self.run_worker(
+                self._decide(decision, run_smoke=action == "approve-smoke"),
+                name="incident-decision",
+                exclusive=False,
+            )
+        elif widget_id == "job-actions" and event.option_id == "cancel":
+            event.option_list.disabled = True
+            self.run_worker(
+                self._cancel_job(),
+                name="job-cancel",
+                exclusive=False,
+            )
+
+    # Esc 取消 Job 选择或把上下文操作焦点交还聊天输入框
+    def on_context_action_select_cancelled(
+        self,
+        event: ContextActionSelect.Cancelled,
+    ) -> None:
+        if event.widget.id == "job-picker":
+            event.widget.remove()
+            self._selection_in_progress = False
+            self._selection_ready.set()
+        self.query_one("#prompt", ChatTextArea).focus()
+
+    # 在日志区外挂载或更新单个稳定 ID 的上下文选择器
+    def _mount_context_actions(
+        self,
+        widget_id: str,
+        choices: list[tuple[str, str]],
+        *,
+        auto_focus: bool,
+    ) -> None:
+        with suppress(NoMatches):
+            current = self.query_one(f"#{widget_id}", ContextActionSelect)
+            if current.action_choices == tuple(choices):
+                return
+            current.remove()
+        action_host = self.query_one("#context-actions", Vertical)
+        action_host.mount(
+            ContextActionSelect(
+                choices,
+                id=widget_id,
+                auto_focus=auto_focus,
+            )
+        )
 
     # 根据输入框斜杠前缀挂载、更新或移除自动补全
     def on_chat_text_area_slash_changed(self, event: ChatTextArea.SlashChanged) -> None:
@@ -818,6 +959,7 @@ class CyanTuiApp(App[None]):
         self._snapshot = await self._client.send_command("job.get", {"job_id": self._job_id})
         await self._subscribe_active_run()
         self._render_header()
+        self._render_job_actions()
         self._render_incident()
 
     # 发现 Incident 新 run 后订阅其 Agent 事件，避免自动诊断流不可见
@@ -915,6 +1057,10 @@ class CyanTuiApp(App[None]):
             self._attempt_id = attempt_id
             self._offsets = {"stdout": 0, "stderr": 0}
             self._append_text(f"attempt {attempt_id}", style="bold")
+            tail_logs = self._tail_logs_on_next_attempt
+            self._tail_logs_on_next_attempt = False
+        else:
+            tail_logs = False
         for stream in ("stdout", "stderr"):
             result = await self._client.send_command(
                 "job.read_log",
@@ -923,10 +1069,28 @@ class CyanTuiApp(App[None]):
                     "attempt_id": attempt_id,
                     "stream": stream,
                     "offset": self._offsets[stream],
-                    "limit": 32 * 1024,
+                    "limit": _LOG_READ_BYTES,
                 },
             )
-            data, next_offset, _eof = _log_result(result)
+            data, next_offset, total_bytes, _eof = _log_result(result)
+            if tail_logs and total_bytes > _LOG_READ_BYTES:
+                tail_offset = total_bytes - _LOG_READ_BYTES
+                result = await self._client.send_command(
+                    "job.read_log",
+                    {
+                        "job_id": self._job_id,
+                        "attempt_id": attempt_id,
+                        "stream": stream,
+                        "offset": tail_offset,
+                        "limit": _LOG_READ_BYTES,
+                    },
+                )
+                data, next_offset, _total_bytes, _eof = _log_result(result)
+                self._append_text(
+                    f"{stream}: showing the last {_LOG_READ_BYTES} of "
+                    f"{total_bytes} persisted bytes",
+                    style="dim",
+                )
             self._offsets[stream] = next_offset
             if data:
                 self._append_log(stream, data)
@@ -986,7 +1150,7 @@ class CyanTuiApp(App[None]):
             self._append_or_update_actions()
         else:
             with suppress(NoMatches):
-                self.query_one("#incident-actions", Static).remove()
+                self.query_one("#incident-actions", ContextActionSelect).remove()
 
     # 将结构化根因和稳定证据引用追加到时间线
     def _append_diagnosis(self, diagnosis: dict[str, Any]) -> None:
@@ -1032,13 +1196,32 @@ class CyanTuiApp(App[None]):
         command_line = f"\n$ {command}" if command else ""
         self._append_text(f"smoke: {status}{suffix}{command_line}", style="bold")
 
-    # 创建或更新唯一的审批提示，避免轮询产生重复块
+    # 根据真实 Job 状态创建或移除非抢焦点的取消训练动作
+    def _render_job_actions(self) -> None:
+        job = _dict_field(self._snapshot, "job")
+        active = str(job.get("status", "")) in _ACTIVE_JOB_STATUSES
+        if active:
+            self._mount_context_actions(
+                "job-actions",
+                [("cancel", "Cancel training process")],
+                auto_focus=False,
+            )
+            return
+        self._cancel_in_flight = False
+        with suppress(NoMatches):
+            self.query_one("#job-actions", ContextActionSelect).remove()
+
+    # 创建或更新唯一的审批选择器，避免轮询产生重复控件
     def _append_or_update_actions(self) -> None:
-        hint = _approval_hint(self._smoke_config, can_apply=self._can_apply)
-        try:
-            self.query_one("#incident-actions", Static).update(Text(hint))
-        except NoMatches:
-            self._append(Static(Text(hint), id="incident-actions"))
+        choices = _incident_action_choices(
+            self._smoke_config,
+            can_apply=self._can_apply,
+        )
+        self._mount_context_actions(
+            "incident-actions",
+            choices,
+            auto_focus=True,
+        )
 
     # 发送一次 Incident 决策并等待后续真实状态由轮询刷新
     async def _decide(self, decision: str, *, run_smoke: bool) -> None:
@@ -1059,18 +1242,40 @@ class CyanTuiApp(App[None]):
         }
         if run_smoke:
             payload["smoke_config_fingerprint"] = self._smoke_config_fingerprint
-        await self._client.send_command(
-            "incident.decide",
-            payload,
-        )
+        try:
+            await self._client.send_command(
+                "incident.decide",
+                payload,
+            )
+        except (IpcError, RuntimeError, OSError) as error:
+            self._append_text(f"Incident decision failed: {error}", style="red")
+            self._awaiting_approval = True
+            with suppress(NoMatches):
+                self.query_one("#incident-actions", ContextActionSelect).remove()
+            self._append_or_update_actions()
+            return
         smoke_note = " with smoke" if decision == "approve" and run_smoke else ""
         self._append_text(f"{decision} submitted{smoke_note}", style="bold")
 
     # 向 daemon 发送用户明确触发的 job.cancel
     async def _cancel_job(self) -> None:
-        if self._client is None or self._job_id is None:
+        if (
+            self._client is None
+            or self._job_id is None
+            or not self._has_running_job()
+            or self._cancel_in_flight
+        ):
             return
-        await self._client.send_command("job.cancel", {"job_id": self._job_id})
+        self._cancel_in_flight = True
+        try:
+            await self._client.send_command("job.cancel", {"job_id": self._job_id})
+        except (IpcError, RuntimeError, OSError) as error:
+            self._cancel_in_flight = False
+            self._append_text(f"Cancellation failed: {error}", style="red")
+            with suppress(NoMatches):
+                self.query_one("#job-actions", ContextActionSelect).remove()
+            self._render_job_actions()
+            return
         self._append_text("Cancellation requested", style="yellow")
 
     # 统一接收多行输入，并按当前本地模式路由到命令解析或普通聊天
@@ -1105,20 +1310,17 @@ class CyanTuiApp(App[None]):
         command, _, argument = content.partition(" ")
         if command == "/help":
             self._append_text(
-                "/monitor · /start · /incident <text> · /approve · "
-                "/approve-no-smoke · /reject · /cancel-job",
+                "/monitor · /start · /jobs · /incident <text>",
                 style="dim",
             )
             return True
         if command == "/monitor":
-            if self._selection_in_progress:
-                self._skip_existing_job_selection()
             if self._job_id is not None and not self._snapshot:
                 await self._refresh_snapshot()
             if self._has_running_job():
                 self._append_text(
                     "The attached training process is still running. "
-                    "Use /cancel-job before starting another.",
+                    "Use the Cancel training process action before starting another.",
                     style="yellow",
                 )
                 return True
@@ -1134,33 +1336,24 @@ class CyanTuiApp(App[None]):
         if command == "/start":
             await self._start_pending_launch()
             return True
+        if command == "/jobs":
+            if self._selection_in_progress:
+                return True
+            previous_job_id = self._job_id
+            await self._choose_job(interactive=True)
+            if self._job_id is not None and (
+                self._job_id != previous_job_id or not self._snapshot
+            ):
+                await self._subscribe_job_events()
+                await self._refresh_snapshot()
+            return True
         if command == "/incident":
             if not argument.strip():
                 self._append_text("Usage: /incident <follow-up>", style="yellow")
             else:
                 await self._send_followup(argument.strip())
             return True
-        if command == "/approve":
-            await self._decide("approve", run_smoke=self._smoke_config is not None)
-            return True
-        if command == "/approve-no-smoke":
-            await self._decide("approve", run_smoke=False)
-            return True
-        if command == "/reject":
-            await self._decide("reject", run_smoke=False)
-            return True
-        if command == "/cancel-job":
-            await self._cancel_job()
-            return True
         return False
-
-    # 跳过历史任务选择器并让连接循环继续保持空闲
-    def _skip_existing_job_selection(self) -> None:
-        self._skip_job_restore = True
-        self._selection_in_progress = False
-        self._selection_ready.set()
-        with suppress(NoMatches):
-            self.query_one("#job-picker", OptionList).remove()
 
     # 仅判断当前附着任务的真实训练进程是否仍在运行
     def _has_running_job(self) -> bool:
@@ -1217,7 +1410,7 @@ class CyanTuiApp(App[None]):
         )
         job_id = str(result["job_id"])
         self._pending_launch = None
-        self._select_job(job_id)
+        self._select_job(job_id, tail_logs=False)
         await self._subscribe_job_events()
         self._append_text(f"Training started: {job_id}", style="bold cyan")
 

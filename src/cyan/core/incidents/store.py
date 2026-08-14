@@ -95,6 +95,12 @@ class IncidentStore:
     def patch_path(self, proposal: Proposal) -> Path:
         return (self.incident_dir(proposal.incident_id) / proposal.patch_path).resolve()
 
+    # 仅清除未通过审批前校验的 proposal，不影响已保存的 diagnosis
+    def clear_proposal(self, incident_id: str) -> None:
+        directory = self.incident_dir(incident_id)
+        for name in ("proposal.json", "proposal.diff"):
+            (directory / name).unlink(missing_ok=True)
+
     # 保存 apply 后的文件哈希，用于 smoke 失败时安全反向应用
     def write_receipt(self, incident_id: str, receipt: PatchReceipt) -> None:
         _write_model(self.incident_dir(incident_id) / "apply.json", receipt)
@@ -157,5 +163,5 @@ class IncidentStore:
     # 清除上一轮 Agent 的活动诊断和 proposal，避免误把旧制品当作新结果
     def clear_agent_artifacts(self, incident_id: str) -> None:
         directory = self.incident_dir(incident_id)
-        for name in ("diagnosis.json", "proposal.json", "proposal.diff"):
-            (directory / name).unlink(missing_ok=True)
+        (directory / "diagnosis.json").unlink(missing_ok=True)
+        self.clear_proposal(incident_id)

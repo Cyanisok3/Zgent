@@ -40,12 +40,14 @@ def _now() -> str:
 # 生成可安全写入 trace 的命令参数，避免持久化 job 启动环境中的密钥
 def _trace_params(method: str, params: dict[str, Any]) -> dict[str, Any]:
     safe = dict(params)
-    if method == "job.start" and "env" in safe:
+    if method in {"job.start", "launch.preview", "launch.start"} and "env" in safe:
         env = safe.get("env")
         safe["env"] = {"forwarded_keys": sorted(env) if isinstance(env, dict) else []}
     text_field = {
         "agent.run": "goal",
         "session.send_message": "content",
+        "launch.preview": "command",
+        "launch.start": "command",
     }.get(method)
     if text_field is not None and text_field in safe:
         content = str(safe.pop(text_field))
@@ -122,6 +124,7 @@ def _trace_result(method: str | None, result: Any) -> Any:
             "data_chars": len(data),
             "data_bytes": len(data.encode("utf-8")),
             "next_offset": result.get("next_offset"),
+            "total_bytes": result.get("total_bytes"),
             "eof": result.get("eof"),
         }
     if method == "job.get":
@@ -142,6 +145,29 @@ def _trace_result(method: str | None, result: Any) -> Any:
             else []
         )
         return {"message_count": len(roles), "roles": roles}
+    if method == "launch.preview":
+        overrides = result.get("env_overrides")
+        return {
+            "argv_count": len(result.get("argv", [])),
+            "cwd": result.get("cwd"),
+            "env_override_keys": (
+                sorted(overrides) if isinstance(overrides, dict) else []
+            ),
+            "executable": result.get("executable"),
+            "config_path_count": len(result.get("config_paths", [])),
+            "fingerprint": result.get("fingerprint"),
+        }
+    if method == "incident.review":
+        before = str(result.get("before_text", ""))
+        after = str(result.get("after_text", ""))
+        return {
+            "proposal_id": result.get("proposal_id"),
+            "path": result.get("path"),
+            "before_chars": len(before),
+            "before_bytes": len(before.encode("utf-8")),
+            "after_chars": len(after),
+            "after_bytes": len(after.encode("utf-8")),
+        }
     return result
 
 
