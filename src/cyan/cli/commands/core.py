@@ -15,6 +15,7 @@ from cyan.core.transport.socket_client import SocketClient
 
 _CORE_LIFECYCLE_TIMEOUT_SECONDS = 15.0
 _DAEMON_LOCK = Path("~/.cyan/cyan-core.lock").expanduser()
+_STARTUP_FAILURE_MARKER = "cyan-core startup failed:"
 
 
 class DaemonMetadata(TypedDict):
@@ -143,6 +144,7 @@ def _print_start_result(
 async def _wait_for_started(
     config: CyanConfig,
     process: subprocess.Popen[bytes],
+    startup_log_cursor: tuple[Path, int] | None,
 ) -> bool:
     deadline = time.monotonic() + _CORE_LIFECYCLE_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -151,14 +153,52 @@ async def _wait_for_started(
             await _ping_check(config)
         except (ConnectionRefusedError, OSError):
             if returncode is not None and _daemon_lock_is_free():
+                detail = _read_startup_failure(startup_log_cursor)
+                suffix = f": {detail}" if detail else ""
                 raise RuntimeError(
-                    f"core exited before becoming ready (status {returncode})"
+                    f"core exited before becoming ready (status {returncode}){suffix}"
                 ) from None
             await asyncio.sleep(0.05)
             continue
         await asyncio.sleep(0.05)
         return process.poll() is None
     raise RuntimeError(f"core did not start at {config.host}:{config.port}")
+
+
+# 记录启动前 core 日志的读取位置，只读取本次子进程追加的内容
+def _startup_log_cursor(config: CyanConfig) -> tuple[Path, int] | None:
+    if not config.logging.file:
+        return None
+    path = Path(config.logging.file).expanduser()
+    try:
+        return path, path.stat().st_size
+    except FileNotFoundError:
+        return path, 0
+    except OSError:
+        return None
+
+
+# 从本次新增日志中提取 daemon 主动记录的启动失败原因
+def _read_startup_failure(cursor: tuple[Path, int] | None) -> str | None:
+    if cursor is None:
+        return None
+    path, offset = cursor
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if len(data) < offset:
+        return None
+    for line in reversed(data[offset:].decode("utf-8", errors="replace").splitlines()):
+        if _STARTUP_FAILURE_MARKER not in line:
+            continue
+        try:
+            message = json.loads(line).get("msg")
+        except (json.JSONDecodeError, AttributeError):
+            message = line.split(_STARTUP_FAILURE_MARKER, 1)[1].rstrip('"')
+        if isinstance(message, str):
+            return message.split(_STARTUP_FAILURE_MARKER, 1)[-1].strip()
+    return None
 
 
 # 通过实际 daemon 连接发送结构化停止请求，避免依赖可陈旧或复用的 PID
@@ -249,6 +289,7 @@ def cmd_core_start(config: CyanConfig, *, json_output: bool = False) -> None:
     if not may_start:
         _print_start_result("already_running", config, json_output=json_output)
         return
+    startup_log_cursor = _startup_log_cursor(config)
     proc = subprocess.Popen(
         [sys.executable, "-m", "cyan.core"],
         start_new_session=True,
@@ -257,7 +298,9 @@ def cmd_core_start(config: CyanConfig, *, json_output: bool = False) -> None:
         stderr=subprocess.DEVNULL,
     )
     try:
-        started_here = asyncio.run(_wait_for_started(config, proc))
+        started_here = asyncio.run(
+            _wait_for_started(config, proc, startup_log_cursor)
+        )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

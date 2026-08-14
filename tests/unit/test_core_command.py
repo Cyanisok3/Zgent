@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from cyan.cli.commands import core
 from cyan.core.config import CyanConfig
@@ -107,3 +110,31 @@ def test_core_start_json_reports_discovered_workspace(monkeypatch, capsys) -> No
     assert payload["workspace_root"] == "/tmp/other-project"
     assert payload["protocol_version"] == 1
     popen.assert_not_called()
+
+
+# 功能：验证 daemon 启动失败时 CLI 返回本次日志中的具体根因
+# 设计：先冻结日志游标再追加真实失败行，避免读取或误报历史日志
+async def test_wait_for_started_reports_current_startup_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "core.log"
+    log_path.write_text("old failure\n", encoding="utf-8")
+    config = CyanConfig()
+    config.logging.file = str(log_path)
+    cursor = core._startup_log_cursor(config)
+    log_path.write_text(
+        'old failure\nlevel=ERROR msg="cyan-core startup failed: ANTHROPIC_API_KEY not set"\n',
+        encoding="utf-8",
+    )
+    process = Mock()
+    process.poll.return_value = 1
+    monkeypatch.setattr(
+        core,
+        "_ping_check",
+        AsyncMock(side_effect=ConnectionRefusedError),
+    )
+    monkeypatch.setattr(core, "_daemon_lock_is_free", Mock(return_value=True))
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY not set"):
+        await core._wait_for_started(config, process, cursor)

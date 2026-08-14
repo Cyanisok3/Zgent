@@ -184,6 +184,7 @@ class CoreApp:
         self._server: SocketServer | None = None
         self._job_start_lock = asyncio.Lock()
         self._shutting_down = False
+        self._startup_ready = False
 
     # 获取进程级排他锁，阻止第二个 daemon 在端口检查前修改恢复状态
     def _acquire_daemon_lock(self) -> None:
@@ -773,6 +774,7 @@ class CoreApp:
         server.register("incident.review", self._incident_review_handler)
 
         addr = await server.start()
+        self._startup_ready = True
         logger.info("cyan-core %s listening addr=%s", cyan.__version__, addr)
         logger.info("config: %s", _config_log_data(self._config))
 
@@ -823,4 +825,10 @@ class CoreApp:
 
 # 同步入口：启动 CoreApp 事件循环
 def run() -> None:
-    asyncio.run(CoreApp().run())
+    app = CoreApp()
+    try:
+        asyncio.run(app.run())
+    except (Exception, SystemExit) as exc:
+        if not app._startup_ready:
+            logger.error("cyan-core startup failed: %s", exc)
+        raise
