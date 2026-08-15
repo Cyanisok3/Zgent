@@ -1,0 +1,6 @@
+FROM tensorflow/tensorflow@sha256:14ec674cefd622aa9d45f07485500da254acaf8adfef80bd0f279db03c735689
+
+RUN python -m pip install --no-cache-dir \
+    Keras==2.3.1 \
+    Keras-Applications==1.0.8 \
+    Keras-Preprocessing==1.1.2

@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from cyan.core.jobs.workflow import WorkflowContract
+
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CONFIG_FLAGS = frozenset(
     {
@@ -172,6 +174,7 @@ def launch_fingerprint(
     launch: ParsedLaunch,
     workspace_root: Path,
     base_env: Mapping[str, str],
+    workflow_contract: WorkflowContract | None = None,
 ) -> str:
     payload = {
         "argv": list(launch.argv),
@@ -179,6 +182,11 @@ def launch_fingerprint(
         "env": build_launch_environment(launch.env_overrides, base_env),
         "executable": launch.executable,
         "config_paths": list(launch.config_paths),
+        "workflow_contract": (
+            workflow_contract.model_dump(mode="json")
+            if workflow_contract is not None
+            else None
+        ),
     }
     encoded = json.dumps(
         payload,

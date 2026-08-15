@@ -1,0 +1,48 @@
+{
+  "defects4ml": {
+    "artifact": "bugs.zip",
+    "license": "CC-BY-4.0",
+    "md5": "369726af86ef206b701cce3af6ab88ed",
+    "record": "https://zenodo.org/records/8376824",
+    "sha256": "ff491cdd7a7d4dc428eede086a21402a93f053caf6bb9c31c75d4ac44e96ef68",
+    "size": 2939196386,
+    "version": "v1",
+    "replay_images": {
+      "tensorflow_1_12": "tensorflow/tensorflow@sha256:1658b00f06cdf8316cd8a905391235dad4bf25a488f1ea989a98a9fe9ec0386e",
+      "tensorflow_1_13": "tensorflow/tensorflow@sha256:47e7e3f536f8884218818dfd491387978189101deced7b46b191df19c15298c2",
+      "tensorflow_2_0": "tensorflow/tensorflow@sha256:0b236338fac6c3361cf3ae1448f8c053994e260c1edc4fa63ed80adb3045abb2",
+      "tensorflow_2_1": "tensorflow/tensorflow@sha256:14ec674cefd622aa9d45f07485500da254acaf8adfef80bd0f279db03c735689"
+    },
+    "replay_datasets": {
+      "cifar_10_python": {
+        "md5": "c58f30108f718f92721af3b95e74349a",
+        "sha256": "6d958be074577803d12ecdefd02955f39262c83c16fe9348329d7fe0b5c001ce",
+        "url": "https://zenodo.org/records/10089977"
+      },
+      "mnist_npz": {
+        "sha256": "731c5ac602752760c8e48fbffcf8c3b850d9dc2a2aedcf2cc48468fc17b673d1",
+        "url": "https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz"
+      }
+    }
+  },
+  "logdx_ci": {
+    "sha256": "c1b1da8fa604be65bcebfbee6d8a50875c739b928374591df0467584f3bd9184",
+    "url": "https://github.com/eyuansu62/LogDx/archive/refs/tags/v1.2.tar.gz",
+    "version": "v1.2"
+  },
+  "loghub": {
+    "bgl": {
+      "sha256": "2a819ea540909db682005c9cf948387a40729b5c2e9f19d430e29ce704825496",
+      "url": "https://raw.githubusercontent.com/logpai/loghub/master/BGL/BGL_2k.log"
+    },
+    "hadoop": {
+      "sha256": "9ecaeb807d50d5fb5a20982ea66f1c8d32545259a51ce7456c1ab78db0509732",
+      "url": "https://raw.githubusercontent.com/logpai/loghub/master/Hadoop/Hadoop_2k.log"
+    },
+    "spark": {
+      "sha256": "2e8b9a37fc5c238253e0b8e18a8bd5e489671def91767ae1192d28c8e1f95901",
+      "url": "https://raw.githubusercontent.com/logpai/loghub/master/Spark/Spark_2k.log"
+    }
+  },
+  "schema_version": 1
+}

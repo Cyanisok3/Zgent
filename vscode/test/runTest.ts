@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, "../..");
   const projectRoot = path.resolve(extensionDevelopmentPath, "..");
   const cyanExecutable = path.join(projectRoot, ".venv", "bin", "cyan");
-  const vscodeExecutablePath = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron";
+  const vscodeExecutablePath = "/Applications/Visual Studio Code.app/Contents/MacOS/Code";
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "cyan-vscode-test-"));
   const workspace = path.join(temporary, "workspace");
   const testHome = path.join(temporary, "home");

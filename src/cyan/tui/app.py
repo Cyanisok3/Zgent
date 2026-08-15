@@ -20,12 +20,7 @@ from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from cyan.core.jobs.launch import (
-    LaunchParseError,
-    ParsedLaunch,
-    format_launch_preview,
-    parse_training_command,
-)
+from cyan.core.bus.commands import WIRE_PROTOCOL_VERSION
 from cyan.core.skills.loader import SkillLoader
 from cyan.core.transport.socket_client import IpcError, SocketClient
 
@@ -46,11 +41,13 @@ _ACTIVE_INCIDENT_STATUSES = {
     "smoke_passed",
     "smoke_skipped",
     "retry_running",
+    "action_required",
 }
 _FOLLOWUP_INCIDENT_STATUSES = {
     "awaiting_approval",
     "stale",
     "unresolved",
+    "action_required",
     "rollback_blocked",
 }
 _STATUS_LABELS = {
@@ -66,6 +63,7 @@ _STATUS_LABELS = {
     "rejected": "Patch rejected",
     "stale": "Workspace or smoke verifier changed; patch was not applied",
     "unresolved": "Incident remains unresolved",
+    "action_required": "Operator action is required before the workflow can continue",
     "rollback_blocked": "Workspace changed; automatic rollback was blocked",
 }
 
@@ -217,6 +215,51 @@ def _job_label(entry: dict[str, Any]) -> str:
 def _job_matches_workspace(entry: dict[str, Any], workspace_root: Path) -> bool:
     _argv, workspace = _launch_fields(entry)
     return bool(workspace) and Path(workspace).expanduser().resolve() == workspace_root
+
+
+# 将 daemon 权威 Launch Preview 渲染为 TUI 文本
+def _format_launch_preview(preview: dict[str, Any]) -> str:
+    argv = preview.get("argv", [])
+    lines = [
+        "Workflow launch preview",
+        f"cwd: {preview.get('cwd', '')}",
+        f"executable: {preview.get('executable', '')}",
+        f"argv: {shlex.join([str(value) for value in argv])}",
+    ]
+    overrides = preview.get("env_overrides")
+    if isinstance(overrides, dict) and overrides:
+        lines.append("environment overrides:")
+        lines.extend(f"  {name}={value}" for name, value in overrides.items())
+    else:
+        lines.append("environment overrides: (none)")
+    config_paths = preview.get("config_paths")
+    if isinstance(config_paths, list) and config_paths:
+        lines.append("config paths:")
+        lines.extend(f"  {value}" for value in config_paths)
+    else:
+        lines.append("config paths: (none detected)")
+    workflow = preview.get("workflow")
+    if isinstance(workflow, dict):
+        lines.append(
+            "workflow contract: "
+            f"v{workflow.get('version')} · "
+            f"{workflow.get('artifact_count', 0)} artifacts · "
+            f"{workflow.get('check_count', 0)} checks"
+        )
+    else:
+        lines.append("workflow contract: (none)")
+    lines.append("Type /start to launch, or /monitor to replace this command.")
+    return "\n".join(lines)
+
+
+# 明确拒绝与当前 TUI 不兼容的 daemon wire protocol
+def _validate_wire_protocol(pong: dict[str, Any]) -> None:
+    observed = pong.get("protocol_version")
+    if observed != WIRE_PROTOCOL_VERSION:
+        raise RuntimeError(
+            "wire protocol mismatch: "
+            f"daemon={observed} client={WIRE_PROTOCOL_VERSION}"
+        )
 
 
 class SlashCompleteWidget(Static):
@@ -651,7 +694,7 @@ class CyanTuiApp(App[None]):
         self._chat_run_id: str | None = None
         self._chat_busy = False
         self._input_mode = "chat"
-        self._pending_launch: ParsedLaunch | None = None
+        self._pending_launch: tuple[str, str] | None = None
         self._slash_items: list[tuple[str, str]] = []
         self._pending_tool_blocks: dict[str, ToolCallBlock] = {}
         self._pending_permission_blocks: dict[str, PermissionBlock] = {}
@@ -711,6 +754,11 @@ class CyanTuiApp(App[None]):
                 self._visible_subagent_run_ids.clear()
                 client.on_event(self._handle_event)
                 event_task = asyncio.create_task(client.run_event_loop())
+                pong = await client.send_command(
+                    "core.ping",
+                    {"client": "cyan-tui"},
+                )
+                _validate_wire_protocol(pong)
                 if reconnecting:
                     self._append_text("Reconnected to daemon.", style="bold cyan")
                 await self._prepare_chat()
@@ -878,6 +926,13 @@ class CyanTuiApp(App[None]):
         elif widget_id == "incident-actions" and event.option_id:
             event.option_list.disabled = True
             action = event.option_id
+            if action == "recheck":
+                self.run_worker(
+                    self._retry_incident(),
+                    name="incident-recheck",
+                    exclusive=False,
+                )
+                return
             decision = "reject" if action == "reject" else "approve"
             self.run_worker(
                 self._decide(decision, run_smoke=action == "approve-smoke"),
@@ -1017,6 +1072,10 @@ class CyanTuiApp(App[None]):
         status_parts = [job_status]
         if attempt_status and attempt_status != job_status:
             status_parts.append(f"attempt:{attempt_status}")
+        phase = str(attempt.get("phase") or "")
+        if phase:
+            check_id = str(attempt.get("check_id") or "")
+            status_parts.append(f"phase:{phase}{f'/{check_id}' if check_id else ''}")
         if attempt.get("returncode") is not None:
             status_parts.append(f"exit={attempt['returncode']}")
         if attempt.get("signal") is not None:
@@ -1148,6 +1207,12 @@ class CyanTuiApp(App[None]):
         )
         if self._awaiting_approval:
             self._append_or_update_actions()
+        elif status == "action_required" and self._incident_id is not None:
+            self._mount_context_actions(
+                "incident-actions",
+                [("recheck", "Recheck workflow")],
+                auto_focus=True,
+            )
         else:
             with suppress(NoMatches):
                 self.query_one("#incident-actions", ContextActionSelect).remove()
@@ -1167,6 +1232,22 @@ class CyanTuiApp(App[None]):
                 text.append(f"\n• {reference}", style="bold")
                 if description:
                     text.append(f"  {description}", style="dim")
+        recovery = diagnosis.get("recovery")
+        if isinstance(recovery, dict):
+            text.append(f"\nRecovery: {recovery.get('summary', '')}", style="bold")
+            actions = recovery.get("actions")
+            if isinstance(actions, list):
+                for action in actions:
+                    if not isinstance(action, dict):
+                        continue
+                    target = f" [{action.get('target')}]" if action.get("target") else ""
+                    text.append(
+                        f"\n•{target} {action.get('instruction', '')}",
+                    )
+                    text.append(
+                        f"\n  Verify: {action.get('verification', '')}",
+                        style="dim",
+                    )
         self._append(Static(text))
 
     # 将完整 proposed diff 作为纯文本追加，避免日志内容被解释成 Rich markup
@@ -1257,6 +1338,20 @@ class CyanTuiApp(App[None]):
         smoke_note = " with smoke" if decision == "approve" and run_smoke else ""
         self._append_text(f"{decision} submitted{smoke_note}", style="bold")
 
+    # 用户完成人工动作后请求 daemon 按 frozen JobSpec 完整重检
+    async def _retry_incident(self) -> None:
+        if self._client is None or self._incident_id is None:
+            return
+        try:
+            await self._client.send_command(
+                "incident.retry",
+                {"incident_id": self._incident_id},
+            )
+        except (IpcError, RuntimeError, OSError) as error:
+            self._append_text(f"Workflow recheck failed: {error}", style="red")
+            return
+        self._append_text("Workflow recheck started", style="bold cyan")
+
     # 向 daemon 发送用户明确触发的 job.cancel
     async def _cancel_job(self) -> None:
         if (
@@ -1290,7 +1385,7 @@ class CyanTuiApp(App[None]):
             exclusive=False,
         )
 
-    # 训练命令输入模式只做本地解析，其他输入先匹配本地斜杠命令
+    # 训练命令输入模式通过 daemon 生成权威预览，其他输入先匹配本地命令
     async def _handle_submission(self, content: str) -> None:
         if self._input_mode == "monitor":
             if content == "/cancel":
@@ -1299,7 +1394,7 @@ class CyanTuiApp(App[None]):
                 self._append_text("Training command entry cancelled.", style="dim")
                 self._update_prompt()
                 return
-            self._preview_launch(content)
+            await self._preview_launch(content)
             return
         handled = await self._handle_local_command(content)
         if not handled:
@@ -1362,26 +1457,36 @@ class CyanTuiApp(App[None]):
         job = _dict_field(self._snapshot, "job")
         return str(job.get("status", "")) in _ACTIVE_JOB_STATUSES
 
-    # 将训练命令解析为确定性预览，解析失败时保持命令输入模式
-    def _preview_launch(self, content: str) -> None:
+    # 通过 daemon 解析命令和 Contract，并保存确认所需指纹
+    async def _preview_launch(self, content: str) -> None:
+        if self._client is None:
+            self._append_text("Daemon is not connected.", style="bold red")
+            return
         try:
-            launch = parse_training_command(
-                content,
-                self._workspace_root,
-                os.environ,
+            preview = await self._client.send_command(
+                "launch.preview",
+                {
+                    "command": content,
+                    "workspace_root": str(self._workspace_root),
+                    "env": dict(os.environ),
+                },
             )
-        except LaunchParseError as error:
+        except (IpcError, RuntimeError, OSError) as error:
             self._append_text(f"Invalid training command: {error}", style="bold red")
             return
-        self._pending_launch = launch
+        fingerprint = str(preview.get("fingerprint") or "")
+        if not fingerprint:
+            self._append_text("Launch preview did not return a fingerprint.", style="red")
+            return
+        self._pending_launch = (content, fingerprint)
         self._input_mode = "chat"
         self._append_text(
-            format_launch_preview(launch, self._workspace_root),
+            _format_launch_preview(preview),
             style="bold",
         )
         self._update_prompt()
 
-    # 用户显式确认后通过现有 job.start 启动真实训练并附着返回的 Job
+    # 用户显式确认后通过 daemon launch.start 校验指纹并启动 Job
     async def _start_pending_launch(self) -> None:
         if self._pending_launch is None:
             self._append_text("No launch preview. Type /monitor first.", style="yellow")
@@ -1397,17 +1502,20 @@ class CyanTuiApp(App[None]):
                 style="yellow",
             )
             return
-        launch = self._pending_launch
-        environment = dict(os.environ)
-        environment.update(launch.env_overrides)
-        result = await self._client.send_command(
-            "job.start",
-            {
-                "argv": list(launch.argv),
-                "workspace_root": str(self._workspace_root),
-                "env": environment,
-            },
-        )
+        command, fingerprint = self._pending_launch
+        try:
+            result = await self._client.send_command(
+                "launch.start",
+                {
+                    "command": command,
+                    "workspace_root": str(self._workspace_root),
+                    "env": dict(os.environ),
+                    "preview_fingerprint": fingerprint,
+                },
+            )
+        except (IpcError, RuntimeError, OSError) as error:
+            self._append_text(f"Launch failed: {error}", style="bold red")
+            return
         job_id = str(result["job_id"])
         self._pending_launch = None
         self._select_job(job_id, tail_logs=False)
@@ -1503,6 +1611,15 @@ class CyanTuiApp(App[None]):
     # 将聊天与 Incident 的流式文本、工具和权限事件追加到统一时间线
     async def _handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type", ""))
+        if event_type == "job.phase_changed":
+            if str(event.get("job_id") or "") == self._job_id:
+                check = event.get("check_id")
+                suffix = f": {check}" if check else ""
+                self._append_text(
+                    f"Workflow phase: {event.get('phase', '')}{suffix}",
+                    style="dim cyan",
+                )
+            return
         if event_type.startswith("job."):
             seq = event.get("seq")
             if (

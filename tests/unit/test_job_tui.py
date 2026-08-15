@@ -20,6 +20,7 @@ from cyan.tui.app import (
     _elapsed_label,
     _incident_action_choices,
     _log_result,
+    _validate_wire_protocol,
 )
 
 
@@ -60,6 +61,14 @@ def test_local_slash_commands_exclude_context_actions() -> None:
         "incident",
         "help",
     ]
+
+
+# 功能：验证 TUI 明确拒绝 v1 daemon 而接受当前 v2
+# 设计：直接调用连接前的纯协议门禁，避免用网络错误掩盖版本不匹配
+def test_tui_rejects_incompatible_wire_protocol() -> None:
+    _validate_wire_protocol({"protocol_version": 2})
+    with pytest.raises(RuntimeError, match="daemon=1 client=2"):
+        _validate_wire_protocol({"protocol_version": 1})
 
 
 # 功能：验证 smoke 配置只在上下文审批选项中增加带 smoke 的明确动作
@@ -758,18 +767,28 @@ async def test_removed_local_commands_cannot_change_state(legacy_command: str) -
     assert all(method != "job.cancel" for method, _params in client.commands)
 
 
-# 功能：验证 /monitor 预览确认后复用现有 job.start 且只展示环境覆盖项
-# 设计：用真实解释器解析并以假 RPC 检查 argv、cwd、合并环境和新 Job 附着状态
+# 功能：验证 /monitor 预览确认后使用 daemon launch RPC 且只展示环境覆盖项
+# 设计：以假 RPC 返回权威预览并检查指纹、cwd、环境和新 Job 附着状态
 async def test_monitor_preview_and_start_use_existing_job_rpc(tmp_path: Path) -> None:
     class _FakeClient:
         # 初始化命令记录
         def __init__(self) -> None:
             self.commands: list[tuple[str, dict[str, Any]]] = []
 
-        # 为 job.start 返回固定 Job，并接受 Job 事件订阅
+        # 为 preview/start 返回固定结果，并接受 Job 事件订阅
         async def send_command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
             self.commands.append((method, params))
-            if method == "job.start":
+            if method == "launch.preview":
+                return {
+                    "argv": [sys.executable, "train.py"],
+                    "cwd": str(tmp_path),
+                    "env_overrides": {"CYAN_TEST_MODE": "quick"},
+                    "executable": sys.executable,
+                    "config_paths": [],
+                    "fingerprint": "a" * 64,
+                    "workflow": None,
+                }
+            if method == "launch.start":
                 return {"job_id": "job-new"}
             return {"subscription_id": "sub-job"}
 
@@ -786,12 +805,14 @@ async def test_monitor_preview_and_start_use_existing_job_rpc(tmp_path: Path) ->
     await app._handle_submission(f"CYAN_TEST_MODE=quick {sys.executable} train.py")
     await app._handle_submission("/start")
 
-    start_method, start_params = client.commands[0]
-    assert start_method == "job.start"
-    assert start_params["argv"] == [sys.executable, "train.py"]
+    preview_method, preview_params = client.commands[0]
+    assert preview_method == "launch.preview"
+    assert preview_params["command"].startswith("CYAN_TEST_MODE=quick")
+    start_method, start_params = client.commands[1]
+    assert start_method == "launch.start"
+    assert start_params["preview_fingerprint"] == "a" * 64
     assert start_params["workspace_root"] == str(tmp_path)
-    assert start_params["env"]["CYAN_TEST_MODE"] == "quick"
-    preview = next(text for text in rendered if text.startswith("Training launch preview"))
+    preview = next(text for text in rendered if text.startswith("Workflow launch preview"))
     assert "CYAN_TEST_MODE=quick" in preview
     assert "PATH=" not in preview
     assert app._job_id == "job-new"

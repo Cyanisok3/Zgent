@@ -1,0 +1,17 @@
+{
+  "benchmark_python": {
+    "numpy": "2.5.2",
+    "pandas": "2.3.3",
+    "pydantic": "2.13.4",
+    "python": "3.12.13",
+    "scikit_learn": "1.9.0",
+    "torch": "2.13.0"
+  },
+  "defects4ml_local_images": {
+    "cyan/defects4ml-tf112:v1": "sha256:f9c78a539685760347967308f71a7777a343152e7c1061919b2eea787a193291",
+    "cyan/defects4ml-tf113:v1": "sha256:6789c1b9da6c8287a78268433afba5636adda10311662f468db53d6dbd6bd07d",
+    "cyan/defects4ml-tf20:v1": "sha256:de262bb50d180bbb0796c14f05a3d00da4f2d366b9dc68d2690fc260767adc4c",
+    "cyan/defects4ml-tf21:v1": "sha256:96802b022a96963ee4ebfb4f742222686dbebfd5e49b809015f6012439342585"
+  },
+  "schema_version": 1
+}

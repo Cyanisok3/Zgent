@@ -328,6 +328,24 @@ export class CyanController implements vscode.Disposable {
     await this.decide("reject", false);
   }
 
+  // 用户完成人工动作后按 daemon 中 frozen JobSpec 完整重检
+  public async recheckWorkflow(): Promise<void> {
+    const incident = this.snapshot?.incident;
+    if (incident?.status !== "action_required" || this.actionInFlight) {
+      return;
+    }
+    this.actionInFlight = true;
+    this.updatePresentation();
+    try {
+      await this.request("incident.retry", { incident_id: incident.id });
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Workflow recheck failed: ${errorMessage(error)}`);
+    } finally {
+      this.actionInFlight = false;
+      await this.refresh();
+    }
+  }
+
   // 直接请求 JobSupervisor 取消当前运行进程组
   public async cancelJob(): Promise<void> {
     if (!isActiveJob(this.snapshot) || this.actionInFlight) {
@@ -592,6 +610,15 @@ export class CyanController implements vscode.Disposable {
           void this.reviewProposal();
         }
       });
+    } else if (current === "action_required") {
+      void vscode.window.showWarningMessage(
+        "cyan requires an operator action before the workflow can continue.",
+        "Open Diagnosis",
+      ).then((action) => {
+        if (action === "Open Diagnosis") {
+          void this.openDiagnosis();
+        }
+      });
     } else if (current === "resolved") {
       void vscode.window.showInformationMessage(
         "cyan resolved the Incident; the original command succeeded.",
@@ -637,7 +664,10 @@ function previewDetail(preview: LaunchPreview): string {
   const configs = preview.config_paths.length === 0
     ? "config paths: none"
     : `config paths: ${preview.config_paths.join(", ")}`;
-  return `${preview.executable} · argv: ${preview.argv.join(" ")} · ${overrides} · ${configs}`;
+  const workflow = preview.workflow === null || preview.workflow === undefined
+    ? "workflow contract: none"
+    : `workflow contract: ${preview.workflow.artifact_count} artifacts, ${preview.workflow.check_count} checks`;
+  return `${preview.executable} · argv: ${preview.argv.join(" ")} · ${overrides} · ${configs} · ${workflow}`;
 }
 
 // 将未知异常收敛为短错误消息

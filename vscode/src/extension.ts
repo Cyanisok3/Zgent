@@ -49,6 +49,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("cyan.reviewProposal", () => controller?.reviewProposal()),
     vscode.commands.registerCommand("cyan.approveProposal", () => controller?.approveProposal()),
     vscode.commands.registerCommand("cyan.rejectProposal", () => controller?.rejectProposal()),
+    vscode.commands.registerCommand("cyan.recheckWorkflow", () => controller?.recheckWorkflow()),
     vscode.commands.registerCommand("cyan.cancelJob", () => controller?.cancelJob()),
     vscode.commands.registerCommand("cyan.refresh", () => controller?.refresh()),
     vscode.commands.registerCommand("cyan.reconnect", () => controller?.reconnect()),

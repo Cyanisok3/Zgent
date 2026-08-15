@@ -6,7 +6,7 @@ from pydantic import BaseModel, Discriminator, Field
 
 from cyan.core.session.model import SessionMode, SessionStatus
 
-WIRE_PROTOCOL_VERSION = 1
+WIRE_PROTOCOL_VERSION = 2
 
 
 class PingCommand(BaseModel):
@@ -139,6 +139,7 @@ class LaunchPreviewResult(BaseModel):
     executable: str
     config_paths: list[str]
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workflow: dict[str, Any] | None = None
 
 
 class LaunchStartCommand(BaseModel):
@@ -170,6 +171,7 @@ class JobGetResult(BaseModel):
     job: dict[str, Any]
     argv: list[str]
     workspace_root: str
+    workflow: dict[str, Any] | None = None
     attempt: dict[str, Any] | None = None
     incident: dict[str, Any] | None = None
     diagnosis: dict[str, Any] | None = None
@@ -226,6 +228,15 @@ class IncidentDecideResult(BaseModel):
     status: str
 
 
+class IncidentRetryCommand(BaseModel):
+    type: Literal["incident.retry"] = "incident.retry"
+    incident_id: str
+
+
+class IncidentRetryResult(BaseModel):
+    status: str
+
+
 class IncidentReviewCommand(BaseModel):
     type: Literal["incident.review"] = "incident.review"
     job_id: str
@@ -260,6 +271,7 @@ Command = Annotated[
     | JobCancelCommand
     | JobReadLogCommand
     | IncidentDecideCommand
+    | IncidentRetryCommand
     | IncidentReviewCommand,
     Discriminator("type"),
 ]

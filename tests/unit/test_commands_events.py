@@ -4,12 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from cyan.core.bus.commands import (
+    WIRE_PROTOCOL_VERSION,
     CoreShutdownCommand,
     CoreShutdownResult,
+    IncidentRetryCommand,
     PingCommand,
     PongResult,
 )
-from cyan.core.bus.events import CoreStartedEvent
+from cyan.core.bus.events import CoreStartedEvent, JobPhaseChangedEvent
 
 
 # 功能：验证 PingCommand 序列化后再反序列化，client 和 type 字段完整保留
@@ -69,3 +71,23 @@ def test_core_started_event_roundtrip() -> None:
     evt2 = CoreStartedEvent.model_validate_json(evt.model_dump_json())
     assert evt2.listen_addr == "127.0.0.1:7437"
     assert evt2.type == "core.started"
+
+
+# 功能：验证 v2 新增 retry 命令和 phase event 的稳定判别字段
+# 设计：直接做 JSON 往返并锁定 Python wire 常量
+def test_workflow_v2_wire_models_roundtrip() -> None:
+    retry = IncidentRetryCommand(incident_id="incident-1")
+    phase = JobPhaseChangedEvent(
+        job_id="job-1",
+        attempt_id="attempt-1",
+        phase="preflight",
+        check_id="schema",
+        ts="2026-05-11T00:00:00Z",
+    )
+
+    assert WIRE_PROTOCOL_VERSION == 2
+    assert IncidentRetryCommand.model_validate_json(retry.model_dump_json()).type == (
+        "incident.retry"
+    )
+    restored = JobPhaseChangedEvent.model_validate_json(phase.model_dump_json())
+    assert (restored.phase, restored.check_id) == ("preflight", "schema")

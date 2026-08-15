@@ -48,6 +48,11 @@ async def _propose(
                 "root_cause": "the observed source causes the crash",
                 "evidence": [_workspace_evidence(path, target)],
                 "confidence": 1.0,
+                "recovery": {
+                    "kind": "patch",
+                    "summary": "Apply the minimal source correction.",
+                    "actions": [],
+                },
             }
         )
     return await tool.invoke(
@@ -79,6 +84,16 @@ async def test_submit_diagnosis_writes_typed_artifact(tmp_path: Path) -> None:
                 }
             ],
             "confidence": 0.9,
+            "recovery": {
+                "kind": "operator_action",
+                "summary": "Correct the external batch input.",
+                "actions": [
+                    {
+                        "instruction": "Regenerate the batch.",
+                        "verification": "Recheck the workflow.",
+                    }
+                ],
+            },
         }
     )
 
@@ -122,6 +137,11 @@ async def test_submit_diagnosis_rejects_unobserved_evidence(tmp_path: Path) -> N
                 }
             ],
             "confidence": 0.9,
+            "recovery": {
+                "kind": "none",
+                "summary": "No safe recovery was identified.",
+                "actions": [],
+            },
         }
     )
 
@@ -340,6 +360,8 @@ async def test_propose_patch_rejects_unsafe_and_protected_paths(
     config = workspace / ".cyan" / "config.toml"
     config.parent.mkdir()
     config.write_text("old\n", encoding="utf-8")
+    workflow = workspace / ".cyan" / "workflow.toml"
+    workflow.write_text("old\n", encoding="utf-8")
     store = IncidentStore(tmp_path / "incidents")
     tool = ProposePatchTool(store, "incident-1", workspace)
 
@@ -357,11 +379,21 @@ async def test_propose_patch_rejects_unsafe_and_protected_paths(
         search="old",
         replace="new",
     )
+    protected_workflow = await _propose(
+        tool,
+        workflow,
+        path=".cyan/workflow.toml",
+        search="old",
+        replace="new",
+    )
 
     assert getattr(escaped, "is_error")
     assert "unsafe workspace path" in getattr(escaped, "content")
     assert getattr(protected, "is_error")
-    assert "verifier config is protected" in getattr(protected, "content")
+    assert "cyan config is protected" in getattr(protected, "content")
+    assert getattr(protected_workflow, "is_error")
+    assert "cyan config is protected" in getattr(protected_workflow, "content")
     assert outside.read_text(encoding="utf-8") == "old\n"
     assert config.read_text(encoding="utf-8") == "old\n"
+    assert workflow.read_text(encoding="utf-8") == "old\n"
     assert not (store.incident_dir("incident-1") / "proposal.json").exists()

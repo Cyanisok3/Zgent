@@ -41,6 +41,7 @@ test("state mutations are hidden from the command palette", () => {
   assert.equal(hidden.get("cyan.approveProposal"), "false");
   assert.equal(hidden.get("cyan.rejectProposal"), "false");
   assert.equal(hidden.get("cyan.cancelJob"), "false");
+  assert.equal(hidden.get("cyan.recheckWorkflow"), "false");
 });
 
 // 功能：验证首版没有引入自定义 Webview surface

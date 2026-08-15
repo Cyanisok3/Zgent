@@ -8,7 +8,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from cyan.core.jobs.launch import parse_training_command
 from cyan.core.transport.socket_client import SocketClient
 from cyan.tui.app import ChatTextArea, CyanTuiApp
 
@@ -31,13 +30,12 @@ async def test_monitor_start_runs_real_job_and_keeps_launch_private(
     app = CyanTuiApp("127.0.0.1", free_port, workspace_root=workspace)
     app._client = client
     app._append_text = lambda content, style="": None  # type: ignore[method-assign]
-    app._pending_launch = parse_training_command(
-        f"CYAN_TUI_TEST=private {sys.executable} train.py",
-        workspace,
-        os.environ,
-    )
+    app._update_prompt = lambda: None  # type: ignore[method-assign]
 
     try:
+        await app._preview_launch(
+            f"CYAN_TUI_TEST=private {sys.executable} train.py"
+        )
         await app._start_pending_launch()
         assert app._job_id is not None
         deadline = asyncio.get_running_loop().time() + 3.0

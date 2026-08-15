@@ -19,7 +19,7 @@ from cyan.core.incidents.models import (
     ProposalFile,
 )
 
-_PROTECTED_CONFIGS = frozenset({".cyan/config.toml"})
+_PROTECTED_CONFIGS = frozenset({".cyan/config.toml", ".cyan/workflow.toml"})
 _BINARY_MARKERS = ("GIT binary patch", "Binary files ")
 _UNSAFE_GIT_MODES = ("120000", "160000")
 _HUNK_HEADER = re.compile(
@@ -209,7 +209,7 @@ def _normalize_header_path(raw: str) -> str | None:
         raise PatchError(f"unsafe patch path: {value!r}")
     normalized = path.as_posix()
     if normalized in _PROTECTED_CONFIGS:
-        raise PatchError(f"verifier config is protected: {normalized}")
+        raise PatchError(f"cyan config is protected: {normalized}")
     if path.parts[0] == ".git":
         raise PatchError("patch may not modify .git")
     return normalized

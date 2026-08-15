@@ -101,6 +101,11 @@
         "icon": "$(close)"
       },
       {
+        "command": "cyan.recheckWorkflow",
+        "title": "Cyan: Recheck Workflow",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "cyan.cancelJob",
         "title": "Cyan: Cancel Training",
         "icon": "$(debug-stop)"
@@ -131,6 +136,10 @@
         },
         {
           "command": "cyan.rejectProposal",
+          "when": "false"
+        },
+        {
+          "command": "cyan.recheckWorkflow",
           "when": "false"
         },
         {

@@ -224,6 +224,15 @@ class JobFinishedEvent(BaseModel):
     ts: str
 
 
+class JobPhaseChangedEvent(BaseModel):
+    type: Literal["job.phase_changed"] = "job.phase_changed"
+    job_id: str
+    attempt_id: str
+    phase: Literal["preflight", "main", "postflight"]
+    check_id: str | None = None
+    ts: str
+
+
 class IncidentOpenedEvent(BaseModel):
     type: Literal["incident.opened"] = "incident.opened"
     job_id: str
@@ -288,6 +297,7 @@ Event = Annotated[
     | SkillInvokedEvent
     | JobStartedEvent
     | JobFinishedEvent
+    | JobPhaseChangedEvent
     | IncidentOpenedEvent
     | IncidentStatusChangedEvent
     | PatchProposedEvent

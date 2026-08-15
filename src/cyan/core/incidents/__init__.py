@@ -14,6 +14,8 @@ from cyan.core.incidents.models import (
     PatchReceipt,
     Proposal,
     ProposalFile,
+    Recovery,
+    RecoveryAction,
 )
 from cyan.core.incidents.patch import (
     PatchError,
@@ -48,6 +50,8 @@ __all__ = [
     "PatchService",
     "Proposal",
     "ProposalFile",
+    "Recovery",
+    "RecoveryAction",
     "ProposePatchTool",
     "ReadJobLogTool",
     "SmokeExecutor",

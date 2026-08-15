@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from cyan.cli.commands.core import _ping_check, cmd_core_start
+from cyan.core.bus.commands import WIRE_PROTOCOL_VERSION
 from cyan.core.config import CyanConfig
 from cyan.core.transport.socket_client import SocketClient
 from cyan.tui.app import CyanTuiApp
@@ -50,6 +51,13 @@ async def _start_job(
     await client.connect()
     event_task = asyncio.create_task(client.run_event_loop())
     try:
+        pong = await client.send_command("core.ping", {"client": "cyan-watch"})
+        observed = pong.get("protocol_version")
+        if observed != WIRE_PROTOCOL_VERSION:
+            raise RuntimeError(
+                "wire protocol mismatch: "
+                f"daemon={observed} client={WIRE_PROTOCOL_VERSION}"
+            )
         result = await client.send_command(
             "job.start",
             {

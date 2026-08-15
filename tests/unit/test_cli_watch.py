@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from cyan.cli import main as cli_main
 from cyan.cli.commands import watch
 
@@ -28,6 +30,8 @@ class _FakeClient:
     # 记录命令并返回固定 job id
     async def send_command(self, method: str, params: dict[str, object]) -> dict[str, object]:
         self.commands.append((method, params))
+        if method == "core.ping":
+            return {"protocol_version": 2}
         return {"job_id": "job-1"}
 
     # 记录连接关闭
@@ -58,6 +62,7 @@ async def test_start_job_sends_workspace_and_argv(monkeypatch, tmp_path: Path) -
 
     assert job_id == "job-1"
     assert clients[0].commands == [
+        ("core.ping", {"client": "cyan-watch"}),
         (
             "job.start",
             {
@@ -68,6 +73,27 @@ async def test_start_job_sends_workspace_and_argv(monkeypatch, tmp_path: Path) -
         )
     ]
     assert clients[0].closed
+
+
+# 功能：验证 watch 在提交 job.start 前明确拒绝旧 wire protocol
+# 设计：让假 daemon 返回 v1，检查连接关闭且命令序列中没有任何状态变更请求
+async def test_start_job_rejects_protocol_mismatch(monkeypatch, tmp_path: Path) -> None:
+    client = _FakeClient("127.0.0.1", 7437)
+
+    # 仅覆盖 ping 返回值，保留命令记录和关闭行为
+    async def send_legacy(method: str, params: dict[str, object]) -> dict[str, object]:
+        client.commands.append((method, params))
+        return {"protocol_version": 1}
+
+    client.send_command = send_legacy  # type: ignore[method-assign]
+    monkeypatch.setattr(watch, "SocketClient", lambda host, port: client)
+    config = SimpleNamespace(host="127.0.0.1", port=7437)
+
+    with pytest.raises(RuntimeError, match="wire protocol mismatch"):
+        await watch._start_job(config, ["python", "train.py"], tmp_path, {})
+
+    assert client.commands == [("core.ping", {"client": "cyan-watch"})]
+    assert client.closed
 
 
 # 功能：验证 `cyan watch -- ...` 保留分隔符后的原始命令参数

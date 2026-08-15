@@ -44,6 +44,11 @@ async def _proposal(tmp_path: Path, old: str, new: str) -> tuple[Path, IncidentS
             "root_cause": "the observed source causes the crash",
             "evidence": evidence,
             "confidence": 1.0,
+            "recovery": {
+                "kind": "patch",
+                "summary": "Apply the minimal source correction.",
+                "actions": [],
+            },
         }
     )
     assert not diagnosis.is_error

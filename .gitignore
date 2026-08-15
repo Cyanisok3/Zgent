@@ -19,3 +19,5 @@ node_modules/
 *.vsix
 workspace/
 /user-tests/FastestDet-cyan/
+/benchmarks/evidence_retrieval/data/
+/benchmark-results/

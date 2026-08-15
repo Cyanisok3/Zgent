@@ -27,11 +27,14 @@ from cyan.core.incidents.log_tool import (
     ReadJobLogTool,
 )
 from cyan.core.incidents.models import (
+    Diagnosis,
     EvidenceRef,
     FailureCapsule,
     Incident,
     IncidentStatus,
     LogSnapshot,
+    Recovery,
+    RecoveryAction,
 )
 from cyan.core.incidents.patch import PatchError, PatchService
 from cyan.core.incidents.smoke import (
@@ -50,6 +53,8 @@ from cyan.core.jobs import (
     JobRecord,
     JobStore,
     JobSupervisor,
+    snapshot_artifact,
+    workflow_contract_fingerprint,
 )
 from cyan.core.jobs.models import JobEventType
 from cyan.core.processes import terminate_owned_process_group
@@ -84,6 +89,7 @@ _FOLLOW_UP_STATUSES: frozenset[IncidentStatus] = frozenset(
         "awaiting_approval",
         "stale",
         "unresolved",
+        "action_required",
         "rollback_blocked",
     }
 )
@@ -365,6 +371,7 @@ class IncidentCoordinator:
     # 从已封口的日志、Git 和启动信息构造确定性失败胶囊
     async def _build_capsule(self, failure: FailureRecord) -> FailureCapsule:
         spec = self._jobs.read_spec(failure.job_id)
+        attempt = self._jobs.read_attempt(failure.job_id, failure.attempt_id)
         root = spec.workspace_root
         stderr_path = self._jobs.log_path(failure.job_id, failure.attempt_id, "stderr")
         stdout_path = self._jobs.log_path(failure.job_id, failure.attempt_id, "stdout")
@@ -388,6 +395,25 @@ class IncidentCoordinator:
             if dirty_output is not None
             else []
         )
+        artifact_before = next(
+            (item for item in attempt.artifact_baseline if item.path == failure.artifact_path),
+            None,
+        )
+        artifact_after = None
+        if spec.workflow_contract is not None and failure.artifact_path is not None:
+            artifact = next(
+                (
+                    item
+                    for item in spec.workflow_contract.artifacts
+                    if item.path == failure.artifact_path
+                ),
+                None,
+            )
+            if artifact is not None:
+                try:
+                    artifact_after = snapshot_artifact(root, artifact)
+                except (OSError, ValueError):
+                    pass
         return FailureCapsule(
             job_id=failure.job_id,
             attempt_id=failure.attempt_id,
@@ -400,6 +426,13 @@ class IncidentCoordinator:
             git_head=git_head_result,
             dirty_paths=dirty_paths,
             environment=_safe_environment(spec.env),
+            phase=failure.phase,
+            check_id=failure.check_id,
+            artifact_path=failure.artifact_path,
+            contract_fingerprint=failure.contract_fingerprint,
+            violation_rule=failure.violation_rule,
+            artifact_before=artifact_before,
+            artifact_after=artifact_after,
             stdout=stdout_snapshot,
             stderr=stderr_snapshot,
         )
@@ -430,14 +463,110 @@ class IncidentCoordinator:
             )
         )
 
-    # 处理真实进程失败：新建或恢复同一个 Incident，并自动唤醒只读 Agent
+    # 判断 preflight artifact 违约是否可直接路由为人工动作
+    def _is_deterministic_operator_failure(self, failure: FailureRecord) -> bool:
+        if (
+            failure.kind != "contract_violation"
+            or failure.phase != "preflight"
+            or failure.artifact_path is None
+            or failure.check_id is not None
+        ):
+            return False
+        spec = self._jobs.read_spec(failure.job_id)
+        if spec.workflow_contract is None:
+            return False
+        return any(
+            artifact.path == failure.artifact_path and artifact.role in {"input", "config"}
+            for artifact in spec.workflow_contract.artifacts
+        )
+
+    # 为确定性 Contract 违约直接写入零 LLM 的 operator_action Diagnosis
+    async def _write_operator_diagnosis(
+        self,
+        store: IncidentStore,
+        incident: Incident,
+        failure: FailureRecord,
+    ) -> None:
+        assert failure.artifact_path is not None
+        fingerprint = failure.contract_fingerprint or "unknown"
+        reference = f"contract:{fingerprint}#artifact:{failure.artifact_path}"
+        spec = self._jobs.read_spec(failure.job_id)
+        artifact = next(
+            (
+                item
+                for item in (spec.workflow_contract.artifacts if spec.workflow_contract else [])
+                if item.path == failure.artifact_path
+            ),
+            None,
+        )
+        diagnosis = Diagnosis(
+            id=uuid.uuid4().hex,
+            incident_id=incident.id,
+            category="config" if artifact is not None and artifact.role == "config" else "data",
+            summary=failure.message,
+            root_cause=(
+                "The frozen workflow contract was violated before the workflow command started."
+            ),
+            evidence=[
+                EvidenceRef(
+                    source="contract",
+                    reference=reference,
+                    description=(
+                        f"Frozen contract rule {failure.violation_rule!r} failed for "
+                        f"{failure.artifact_path}."
+                    ),
+                )
+            ],
+            confidence=1.0,
+            recovery=Recovery(
+                kind="operator_action",
+                summary="Provide or repair the required workflow artifact.",
+                actions=[
+                    RecoveryAction(
+                        target=failure.artifact_path,
+                        instruction=(
+                            f"Create or repair {failure.artifact_path} so it satisfies "
+                            f"the frozen contract rule {failure.violation_rule}."
+                        ),
+                        verification=(
+                            "Choose Recheck workflow; Cyan must pass preflight before "
+                            "starting the frozen command."
+                        ),
+                    )
+                ],
+            ),
+            created_at=_now(),
+        )
+        store.clear_proposal(incident.id)
+        store.write_diagnosis(diagnosis)
+        incident.active_run_id = None
+        incident.active_proposal_id = None
+        await self._set_status(store, incident, "action_required")
+
+    # 将一次失败路由到确定性人工动作或现有只读 Incident Agent
+    async def _route_incident_failure(
+        self,
+        store: IncidentStore,
+        incident: Incident,
+        failure: FailureRecord,
+        message: str,
+    ) -> None:
+        if self._is_deterministic_operator_failure(failure):
+            await self._write_operator_diagnosis(store, incident, failure)
+            return
+        self._spawn(
+            self._run_diagnosis(store, incident, message),
+            f"incident-diagnose-{incident.id}",
+        )
+
+    # 处理可诊断 workflow 失败：新建或恢复同一个 Incident 并进行确定性路由
     async def handle_failure(
         self,
         job: JobRecord,
         attempt: AttemptRecord,
         failure: FailureRecord,
     ) -> None:
-        if failure.kind != "process_exit":
+        if failure.kind not in {"process_exit", "contract_violation"}:
             return
         capsule = await self._persist_capsule(failure)
         latest = self._latest_incident(job.id)
@@ -452,13 +581,11 @@ class IncidentCoordinator:
             incident.active_proposal_id = None
             store.clear_agent_artifacts(incident.id)
             await self._set_status(store, incident, "diagnosing")
-            self._spawn(
-                self._run_diagnosis(
-                    store,
-                    incident,
-                    "The patched full training command failed. Reinvestigate this same incident.",
-                ),
-                f"incident-rediagnose-{incident.id}",
+            await self._route_incident_failure(
+                store,
+                incident,
+                failure,
+                "The replayed full workflow failed. Reinvestigate this same incident.",
             )
             return
 
@@ -491,14 +618,11 @@ class IncidentCoordinator:
                 ts=now.isoformat(),
             )
         )
-        self._spawn(
-            self._run_diagnosis(
-                store,
-                incident,
-                "Investigate this real failed training process and submit an "
-                "evidence-based diagnosis.",
-            ),
-            f"incident-diagnose-{incident.id}",
+        await self._route_incident_failure(
+            store,
+            incident,
+            failure,
+            "Investigate this real failed Data/ML workflow and submit an evidence-based diagnosis.",
         )
 
     # 在同一只读 Incident session 中执行一轮调查
@@ -526,6 +650,17 @@ class IncidentCoordinator:
         except (FileNotFoundError, ValueError):
             await self._set_status(store, incident, "unresolved")
             return
+        if diagnosis.recovery is not None:
+            if diagnosis.recovery.kind == "operator_action":
+                store.clear_proposal(incident.id)
+                incident.active_proposal_id = None
+                await self._set_status(store, incident, "action_required")
+                return
+            if diagnosis.recovery.kind == "none":
+                store.clear_proposal(incident.id)
+                incident.active_proposal_id = None
+                await self._set_status(store, incident, "unresolved")
+                return
         try:
             proposal = store.read_proposal(incident.id)
         except (FileNotFoundError, ValueError):
@@ -599,6 +734,15 @@ class IncidentCoordinator:
             evidence_refs.add(stderr_reference)
         if capsule.stdout.included_end > capsule.stdout.included_start:
             evidence_refs.add(stdout_reference)
+        contract_reference = None
+        if capsule.contract_fingerprint is not None:
+            subject = (
+                f"artifact:{capsule.artifact_path}"
+                if capsule.artifact_path is not None
+                else f"check:{capsule.check_id or capsule.phase or 'workflow'}"
+            )
+            contract_reference = f"contract:{capsule.contract_fingerprint}#{subject}"
+            evidence_refs.add(contract_reference)
 
         # 只接受本轮工具实际返回或 failure capsule 明确给出的引用
         def validate_evidence(evidence: EvidenceRef) -> str | None:
@@ -607,22 +751,28 @@ class IncidentCoordinator:
             if evidence.source in ("stdout", "stderr"):
                 if not evidence.reference.startswith(f"{evidence.source}:"):
                     return "log evidence source does not match its reference"
+            elif evidence.source == "contract":
+                if not evidence.reference.startswith("contract:"):
+                    return "contract evidence source does not match its reference"
             elif "@sha256:" not in evidence.reference:
                 return "workspace evidence must include a path and SHA-256"
             return None
 
         system_prompt = (
-            "You are cyan's read-only Incident Agent for a crashed local ML training process. "
+            "You are cyan's read-only Incident Agent for a failed local Data/ML workflow. "
             "This is incident response, not metric optimization or experiment research.\n"
             "You may inspect only the supplied workspace and this incident's immutable logs. "
             "Never claim a command ran, never modify the workspace, and never optimize loss or "
             "accuracy. Start from the failure capsule and traceback, then use targeted log search "
             "and small source reads only as needed. As soon as the evidence is sufficient, call "
-            "submit_diagnosis exactly once before considering a patch. Log evidence must cite "
+            "submit_diagnosis exactly once before considering a patch. Every diagnosis must "
+            "select recovery.kind=patch, operator_action, or none and provide a concise "
+            "recovery summary plus structured operator actions when applicable. Log evidence "
+            "must cite "
             "references returned by read_job_log; workspace evidence must cite path@sha256#line "
             "references returned by read/search tools. If the crash is fully caused by an invalid "
             "launch argument, missing external path or data, or the host environment, stop after "
-            "diagnosis and tell the user what to change; do not add validation or fallback code. "
+            "diagnosis with recovery.kind=operator_action; do not add validation or fallback code. "
             "Otherwise propose a patch only when one minimal source or config edit directly fixes "
             "the observed crash. Modify only the causal call site; do not harden similar sites, "
             "refactor, or make unrelated improvements. Then call propose_patch with one relative "
@@ -635,6 +785,7 @@ class IncidentCoordinator:
             f"Failure capsule:\n{capsule.model_dump_json(indent=2)}\n"
             f"Default stderr reference: {stderr_reference}\n"
             f"Default stdout reference: {stdout_reference}\n"
+            f"Frozen contract reference: {contract_reference}\n"
             f"{smoke_context}"
         )
         return RunProfile(
@@ -699,6 +850,16 @@ class IncidentCoordinator:
             "job": job.model_dump(mode="json"),
             "argv": spec.argv,
             "workspace_root": str(spec.workspace_root),
+            "workflow": (
+                {
+                    "version": spec.workflow_contract.version,
+                    "artifact_count": len(spec.workflow_contract.artifacts),
+                    "check_count": len(spec.workflow_contract.checks),
+                    "fingerprint": workflow_contract_fingerprint(spec.workflow_contract),
+                }
+                if spec.workflow_contract is not None
+                else None
+            ),
             "attempt": attempt.model_dump(mode="json") if attempt is not None else None,
             "incident": None,
             "diagnosis": None,
@@ -762,7 +923,15 @@ class IncidentCoordinator:
                     if smoke_result is not None
                     else None
                 ),
-                "can_apply": capsule is not None and capsule.git_head is not None,
+                "can_apply": (
+                    capsule is not None
+                    and capsule.git_head is not None
+                    and (
+                        diagnosis is None
+                        or diagnosis.recovery is None
+                        or diagnosis.recovery.kind == "patch"
+                    )
+                ),
             }
         )
         return view
@@ -895,6 +1064,44 @@ class IncidentCoordinator:
             self._spawn(
                 self._observe_retry(store, incident),
                 f"incident-verify-{incident.id}",
+            )
+            return incident.status
+
+    # 从 action_required 使用 frozen JobSpec 启动完整 workflow 重检
+    async def retry(self, incident_id: str) -> str:
+        store, incident = self._find_incident(incident_id)
+        lock = self._decision_locks.setdefault(incident_id, asyncio.Lock())
+        async with lock:
+            incident = store.read_incident(incident_id)
+            if incident.status != "action_required":
+                raise ValueError("incident is not awaiting an operator action")
+            spec = self._jobs.read_spec(incident.job_id)
+            await self._set_status(store, incident, "retry_running")
+            try:
+                retry_job = await self._supervisor.retry(incident.job_id)
+            except RuntimeError:
+                await self._set_status(store, incident, "unresolved")
+                return incident.status
+            if retry_job.status == "running" and retry_job.current_attempt_id is not None:
+                persisted = self._jobs.find_attempt_event(
+                    retry_job.id,
+                    retry_job.current_attempt_id,
+                    "job.started",
+                )
+                if persisted is not None:
+                    await self._bus.publish(
+                        JobStartedEvent(
+                            seq=persisted.seq,
+                            job_id=retry_job.id,
+                            attempt_id=retry_job.current_attempt_id,
+                            argv=spec.argv,
+                            workspace_root=str(spec.workspace_root),
+                            ts=persisted.occurred_at,
+                        )
+                    )
+            self._spawn(
+                self._observe_retry(store, incident),
+                f"incident-recheck-{incident.id}",
             )
             return incident.status
 
@@ -1128,7 +1335,7 @@ class IncidentCoordinator:
                     except (FileNotFoundError, OSError, ValueError):
                         pass
                     else:
-                        if failure.kind == "process_exit":
+                        if failure.kind in {"process_exit", "contract_violation"}:
                             await self.handle_failure(job, attempt, failure)
                             continue
             for incident in incidents:

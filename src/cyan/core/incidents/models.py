@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from cyan.core.jobs.workflow import ArtifactMetadata, WorkflowPhase
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -21,6 +23,7 @@ IncidentStatus = Literal[
     "rejected",
     "stale",
     "unresolved",
+    "action_required",
     "rollback_blocked",
 ]
 DiagnosisCategory = Literal[
@@ -36,8 +39,9 @@ DiagnosisCategory = Literal[
     "runtime",
     "unknown",
 ]
-EvidenceSource = Literal["stdout", "stderr", "workspace"]
+EvidenceSource = Literal["stdout", "stderr", "workspace", "contract"]
 ChangeType = Literal["create", "modify", "delete"]
+RecoveryKind = Literal["patch", "operator_action", "none"]
 
 
 class EvidenceRef(BaseModel):
@@ -74,6 +78,31 @@ class Incident(BaseModel):
         return value
 
 
+class RecoveryAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str | None = Field(default=None, max_length=1024)
+    instruction: str = Field(min_length=1, max_length=4000)
+    verification: str = Field(min_length=1, max_length=4000)
+
+
+class Recovery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: RecoveryKind
+    summary: str = Field(min_length=1, max_length=4000)
+    actions: list[RecoveryAction] = Field(default_factory=list, max_length=32)
+
+    # 保证人工恢复包含动作，patch/none 不夹带人工步骤
+    @model_validator(mode="after")
+    def _validate_actions(self) -> Recovery:
+        if self.kind == "operator_action" and not self.actions:
+            raise ValueError("operator_action recovery requires at least one action")
+        if self.kind != "operator_action" and self.actions:
+            raise ValueError("only operator_action recovery may include actions")
+        return self
+
+
 class Diagnosis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -84,6 +113,7 @@ class Diagnosis(BaseModel):
     root_cause: str = Field(min_length=1, max_length=8000)
     evidence: list[EvidenceRef] = Field(min_length=1, max_length=32)
     confidence: float = Field(ge=0.0, le=1.0)
+    recovery: Recovery | None = None
     created_at: datetime
 
 
@@ -141,11 +171,26 @@ class FailureCapsule(BaseModel):
     argv: list[str] = Field(min_length=1)
     cwd: str
     occurred_at: datetime
-    failure_kind: Literal["launch_error", "process_exit", "supervisor_error"]
+    failure_kind: Literal[
+        "launch_error",
+        "process_exit",
+        "supervisor_error",
+        "contract_violation",
+    ]
     returncode: int | None = None
     signal: int | None = None
     git_head: str | None = None
     dirty_paths: list[str] = Field(default_factory=list)
     environment: dict[str, str] = Field(default_factory=dict)
+    phase: WorkflowPhase | None = None
+    check_id: str | None = None
+    artifact_path: str | None = None
+    contract_fingerprint: str | None = Field(
+        default=None,
+        pattern=_SHA256_PATTERN,
+    )
+    violation_rule: str | None = None
+    artifact_before: ArtifactMetadata | None = None
+    artifact_after: ArtifactMetadata | None = None
     stdout: LogSnapshot
     stderr: LogSnapshot

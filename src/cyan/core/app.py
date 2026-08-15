@@ -28,6 +28,8 @@ from cyan.core.bus.commands import (
     EventSubscribeResult,
     IncidentDecideCommand,
     IncidentDecideResult,
+    IncidentRetryCommand,
+    IncidentRetryResult,
     IncidentReviewCommand,
     IncidentReviewResult,
     JobCancelCommand,
@@ -59,7 +61,7 @@ from cyan.core.bus.commands import (
     SessionSendMessageResult,
 )
 from cyan.core.bus.envelope import EventPushEnvelope, HandlerError
-from cyan.core.bus.events import JobFinishedEvent, JobStartedEvent
+from cyan.core.bus.events import JobFinishedEvent, JobPhaseChangedEvent, JobStartedEvent
 from cyan.core.config import CyanConfig, get_config
 from cyan.core.events.bus import EventBus
 from cyan.core.incidents.coordinator import IncidentCoordinator
@@ -71,6 +73,9 @@ from cyan.core.jobs import (
     JobSpec,
     JobStore,
     JobSupervisor,
+    WorkflowContract,
+    load_workflow_contract,
+    workflow_contract_fingerprint,
 )
 from cyan.core.jobs.launch import (
     LaunchParseError,
@@ -289,6 +294,22 @@ class CoreApp:
         assert self._incidents is not None
         await self._incidents.handle_failure(job, attempt, failure)
 
+    # 将当前持久化 phase 作为实时 UI 增量广播
+    async def _job_phase_handler(
+        self,
+        job: JobRecord,
+        attempt: AttemptRecord,
+    ) -> None:
+        await self._bus.publish(
+            JobPhaseChangedEvent(
+                job_id=job.id,
+                attempt_id=attempt.id,
+                phase=attempt.phase,
+                check_id=attempt.check_id,
+                ts=_now(),
+            )
+        )
+
     # 为 Incident session 注入只读工具和不可压缩系统约束
     def _run_profile(self, session: Session) -> RunProfile | None:
         if session.mode != "incident":
@@ -296,9 +317,51 @@ class CoreApp:
         assert self._incidents is not None
         return self._incidents.profile_for_session(session)
 
-    # 在唯一启动锁内创建真实后台进程 Job
-    async def _start_job(self, cmd: JobStartCommand) -> JobStartResult:
+    # 返回只包含计数和指纹的公开 Workflow Contract 摘要
+    def _workflow_summary(
+        self,
+        contract: WorkflowContract | None,
+    ) -> dict[str, Any] | None:
+        if contract is None:
+            return None
+        return {
+            "version": contract.version,
+            "artifact_count": len(contract.artifacts),
+            "check_count": len(contract.checks),
+            "fingerprint": workflow_contract_fingerprint(contract),
+        }
+
+    # 使用已冻结 Contract 创建真实后台进程 Job，调用方必须持有启动锁
+    async def _start_job_locked(
+        self,
+        cmd: JobStartCommand,
+        contract: WorkflowContract | None,
+    ) -> JobStartResult:
         assert self._job_supervisor is not None
+        root = Path(cmd.workspace_root).expanduser()
+        if not root.is_absolute():
+            raise HandlerError(-32602, "workspace_root must be absolute")
+        try:
+            job = await self._job_supervisor.start(
+                JobSpec(
+                    argv=cmd.argv,
+                    workspace_root=root,
+                    env=cmd.env,
+                    workflow_contract=contract,
+                )
+            )
+        except (OSError, ValueError) as exc:
+            raise HandlerError(-32602, str(exc)) from exc
+        assert job.current_attempt_id is not None
+        if job.status == "running":
+            await self._publish_latest_job_event(job, "job.started")
+        task = asyncio.create_task(self._watch_job(job.id), name=f"job-watch-{job.id}")
+        self._running_runs.add(task)
+        task.add_done_callback(self._running_runs.discard)
+        return JobStartResult(job_id=job.id)
+
+    # 在唯一启动锁内读取并冻结当前 Contract 后创建 Job
+    async def _start_job(self, cmd: JobStartCommand) -> JobStartResult:
         root = Path(cmd.workspace_root).expanduser()
         if not root.is_absolute():
             raise HandlerError(-32602, "workspace_root must be absolute")
@@ -306,18 +369,10 @@ class CoreApp:
             if self._shutting_down:
                 raise HandlerError(CORE_SHUTTING_DOWN, "core is shutting down")
             try:
-                job = await self._job_supervisor.start(
-                    JobSpec(argv=cmd.argv, workspace_root=root, env=cmd.env)
-                )
+                contract = load_workflow_contract(root)
             except (OSError, ValueError) as exc:
                 raise HandlerError(-32602, str(exc)) from exc
-            assert job.current_attempt_id is not None
-            if job.status == "running":
-                await self._publish_latest_job_event(job, "job.started")
-            task = asyncio.create_task(self._watch_job(job.id), name=f"job-watch-{job.id}")
-            self._running_runs.add(task)
-            task.add_done_callback(self._running_runs.discard)
-            return JobStartResult(job_id=job.id)
+            return await self._start_job_locked(cmd, contract)
 
     # 校验公开 job.start 参数后复用唯一训练启动边界
     async def _job_start_handler(self, params: dict[str, Any]) -> JobStartResult:
@@ -332,7 +387,8 @@ class CoreApp:
         root = Path(cmd.workspace_root).expanduser()
         try:
             launch = parse_training_command(cmd.command, root, cmd.env)
-            fingerprint = launch_fingerprint(launch, root, cmd.env)
+            contract = load_workflow_contract(root)
+            fingerprint = launch_fingerprint(launch, root, cmd.env, contract)
         except (LaunchParseError, OSError, ValueError) as exc:
             raise HandlerError(-32602, str(exc)) from exc
         return LaunchPreviewResult(
@@ -342,6 +398,7 @@ class CoreApp:
             executable=launch.executable,
             config_paths=list(launch.config_paths),
             fingerprint=fingerprint,
+            workflow=self._workflow_summary(contract),
         )
 
     # 重新解析已确认命令并在指纹一致时启动真实训练
@@ -351,20 +408,28 @@ class CoreApp:
     ) -> LaunchStartResult:
         cmd = LaunchStartCommand.model_validate(params)
         root = Path(cmd.workspace_root).expanduser()
-        try:
-            launch = parse_training_command(cmd.command, root, cmd.env)
-            fingerprint = launch_fingerprint(launch, root, cmd.env)
-        except (LaunchParseError, OSError, ValueError) as exc:
-            raise HandlerError(-32602, str(exc)) from exc
-        if not secrets.compare_digest(fingerprint, cmd.preview_fingerprint):
-            raise HandlerError(-32602, "launch preview is stale; preview the command again")
-        result = await self._start_job(
-            JobStartCommand(
-                argv=list(launch.argv),
-                workspace_root=str(root.resolve(strict=True)),
-                env=build_launch_environment(launch.env_overrides, cmd.env),
+        async with self._job_start_lock:
+            if self._shutting_down:
+                raise HandlerError(CORE_SHUTTING_DOWN, "core is shutting down")
+            try:
+                launch = parse_training_command(cmd.command, root, cmd.env)
+                contract = load_workflow_contract(root)
+                fingerprint = launch_fingerprint(launch, root, cmd.env, contract)
+            except (LaunchParseError, OSError, ValueError) as exc:
+                raise HandlerError(-32602, str(exc)) from exc
+            if not secrets.compare_digest(fingerprint, cmd.preview_fingerprint):
+                raise HandlerError(
+                    -32602,
+                    "launch preview is stale; preview the command again",
+                )
+            result = await self._start_job_locked(
+                JobStartCommand(
+                    argv=list(launch.argv),
+                    workspace_root=str(root.resolve(strict=True)),
+                    env=build_launch_environment(launch.env_overrides, cmd.env),
+                ),
+                contract,
             )
-        )
         return LaunchStartResult(job_id=result.job_id)
 
     # 将指定 Attempt 最新的持久化状态转换后发布到实时事件流
@@ -467,6 +532,19 @@ class CoreApp:
         except (KeyError, OSError, ValueError) as exc:
             raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
         return IncidentDecideResult(status=status)
+
+    # 在 action_required 状态按 frozen JobSpec 完整重跑 workflow
+    async def _incident_retry_handler(
+        self,
+        params: dict[str, Any],
+    ) -> IncidentRetryResult:
+        cmd = IncidentRetryCommand.model_validate(params)
+        assert self._incidents is not None
+        try:
+            status = await self._incidents.retry(cmd.incident_id)
+        except (KeyError, OSError, ValueError) as exc:
+            raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
+        return IncidentRetryResult(status=status)
 
     # 返回当前待审批 proposal 的只读前后文本
     async def _incident_review_handler(
@@ -715,6 +793,7 @@ class CoreApp:
         self._job_supervisor = JobSupervisor(
             self._job_store,
             failure_callback=self._job_failure_handler,
+            phase_callback=self._job_phase_handler,
         )
         interrupted = await self._job_supervisor.recover_interrupted()
         if interrupted:
@@ -771,6 +850,7 @@ class CoreApp:
         server.register("job.cancel", self._job_cancel_handler)
         server.register("job.read_log", self._job_read_log_handler)
         server.register("incident.decide", self._incident_decide_handler)
+        server.register("incident.retry", self._incident_retry_handler)
         server.register("incident.review", self._incident_review_handler)
 
         addr = await server.start()

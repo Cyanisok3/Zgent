@@ -6,8 +6,68 @@
 9/9 正确，6 个可修补病例首次批准后全部由原命令验证成功，3 个参数或路径故障均停在操作
 建议且没有 proposal，3 个超过 5 MiB 的长日志病例全部正确处理。
 
-该结果支持 cyan 作为受管的本地训练崩溃恢复 Agent，不支持将结论外推到通用 ML 故障、
+该结果支持 cyan 原有的受管本地训练崩溃恢复闭环，不支持将结论外推到通用 ML 故障、
 CUDA、分布式训练或静默质量问题。
+
+当前实现已把 failure semantics 扩展为“退出码 + 用户声明的 Workflow Contract”，把 recovery
+扩展为 `patch | operator_action | none`。Contract 解析、freshness、pre/main/post 生命周期、
+零 LLM 的确定性路由、frozen retry 和客户端展示已进入自动化测试。新的 Benchmark 已实际
+运行数据处理、特征转换和CPU/PyTorch workload，但没有通过生产 Incident Runtime 调用LLM；
+因此下面旧9-case数字仍只代表原有明确非零退出 Pilot，不应作为 Contract 违约的Agent实测。
+
+## Evidence Retrieval Benchmark v1
+
+当前工作区已实现独立 Benchmark harness、隔离检索 worker、完整指标与配对 bootstrap、
+Gold/Agent 双人盲审接口和可选 Agent 策略赛道，没有修改生产 Incident profile。2026-08-15
+实际运行了48个 Pandas/scikit-learn/PyTorch CPU 受控 Case、35个 LogDx-CI v1.2 Case，以及
+9个5/50/500 MiB LogHub压力 Case，共92 Cases。48个 Core Case 均完成失败/成功双重放，
+切分为36 train / 8 dev / 4 test。
+
+### Cyan Core 48（尚未加入12个历史故障）
+
+|方法|R64|R128|R256|Supporting|nDCG|First B|Density|Miss|P50 ms|P95 ms|RSSΔ P95 MiB|扫描 MiB|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+|BM25|.500|1.000|1.000|1.000|.294|61,340|.00061|.000|9.98|10.61|.77|.17|
+|Capsule Tail|.250|.250|.250|1.000|.250|0|.00000|.750|.03|.04|.06|0|
+|Heuristic Hybrid|1.000|1.000|1.000|1.000|.473|8,192|.00061|.000|10.06|10.59|.77|.17|
+|Literal Search|1.000|1.000|1.000|1.000|.473|8,192|.00061|.000|7.17|7.71|.75|.09|
+|Oracle|1.000|1.000|1.000|1.000|.723|74|.75000|.000|.04|.06|.08|0|
+|Random|.792|1.000|1.000|1.000|.264|50,015|.00061|.000|2.03|2.53|.17|.09|
+
+### LogDx-CI 35
+
+|方法|R64|R128|R256|Supporting|nDCG|First B|Density|Miss|P50 ms|P95 ms|RSSΔ P95 MiB|扫描 MiB|
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+|BM25|.749|.824|.893|.920|.846|1,334|.01491|.057|34.31|344.53|1.64|2.11|
+|Capsule Tail|.703|.703|.703|.723|.759|0|.00000|.086|.03|.05|.06|0|
+|Heuristic Hybrid|.780|.853|.893|.920|.851|5,305|.01481|.057|35.91|348.06|1.75|2.11|
+|Literal Search|.803|.864|.893|.914|.861|0|.01485|.086|29.70|339.33|6.89|1.06|
+|Oracle|1.000|1.000|1.000|1.000|.976|13|.99825|.000|.07|.09|.08|0|
+|Random|.731|.843|.873|.908|.841|5,542|.01414|.029|2.36|6.20|6.75|1.06|
+
+First B 是成功命中 Case 的条件均值，必须和 Miss 一起阅读。完整 JSON 还保存每项指标的
+95% CI、相对 Capsule Tail 的逐 Case 配对差值和 split 分解。LogDx-CI 多数日志较短，Random
+在256 KiB预算下也达到.873，不能只依赖R256判断算法优劣。
+
+### Scale Stress 9
+
+除 Oracle 外，五个基线在全部前/中/尾位置均未召回人工埋入的稀有 anchor。这不是评分器
+错误：BGL/Spark 中高频 `FATAL/failed` 块压过了真正稀有证据，暴露出现有 query/异常模式
+策略缺少全局稀有度。压力集总体 P95 中，Random 约656 ms但增量RSS约696 MiB；Literal
+约28.6 s且约701 MiB；BM25/Hybrid约42.1/42.0 s、最大 Case 双遍扫描1,000 MiB，增量RSS低于2 MiB。
+该集合只证明检索规模与资源行为，不证明 Data/ML 根因诊断正确率。
+
+Defects4ML v1 的 `bugs.zip` 已按官方 MD5 与 SHA-256 校验，并在四个固定 x86 TensorFlow
+容器中重放15个低资源候选，并预置经校验的 MNIST/CIFAR-10 缓存。076、093、082、087、079、
+080共6个满足 buggy 非零且 fixed 为零；081、090、054、053的 fixed 在600秒内超时，另外5个
+fixed 仍失败，所以没有发布历史 bundle，也没有用合成 Case 补位。候选原始
+日志和返回码保存在临时重放目录，机器可读摘要为
+`benchmark-results/v1/historical-replay-audit.json`。
+
+正式验收仍被三项事实门禁阻止：12个公开历史故障仅有6个候选完成双重放；12个最终 Core test
+尚未完成双人Gold复核；当前环境没有模型凭据，因此141次Agent策略运行与人工诊断评分尚未
+开始。机器可读结果位于 `benchmark-results/v1/retrieval-comparison.json`，不得把当前92
+Case结果描述成正式完整60-case Core或Agent排行榜。
 
 ## 版本与环境
 
@@ -90,7 +150,7 @@ FastestDet 性能数据来自约 3.6 秒的极短 fixture，其中约 2 秒为�
 /private/tmp/cyan-llm-pilot-cOJSMG/home/.cyan/
 ```
 
-当前工作区重新验收结果：
+旧基线的工作区验收结果：
 
 ```text
 Ruff: passed
@@ -101,12 +161,28 @@ integration: 18 passed
 pytest: 443 passed in 40.44s
 ```
 
+Workflow Contract 增量的当前自动化验收结果：
+
+```text
+Ruff: passed
+mypy: passed
+WIRE_PROTOCOL.md v2: up to date
+unit: 455 passed（含 14 个 Evidence Retrieval Benchmark 测试）
+integration: 18 passed
+pytest: 473 passed in 67.67s
+VS Code typecheck/unit: passed, 8 tests
+VS Code Extension Host: passed
+VSIX package: passed
+```
+
+这些结果验证实现和协议闭环，不替代尚未执行的三类真实 workload Pilot。
+
 ## VS Code Alpha 验收
 
 2026-07-29 增加的薄型 VS Code 客户端未修改 Incident Agent、进程监督或补丁应用策略，
 因此没有重跑上述 9-case LLM Pilot。新增验收覆盖：
 
-- TypeScript 编译与 7 个纯 UI、cursor、Trust 和上下文动作测试；
+- TypeScript 编译与 8 个纯 UI、cursor、Trust 和上下文动作测试；
 - 真实 VS Code Extension Host 启动、daemon 连接、命令注册和 snapshot refresh；
 - 真实 daemon、真实训练子进程的 `launch.preview → launch.start → job.read_log`；
 - VSIX 成功打包；关闭扩展只断开客户端；

@@ -36,6 +36,12 @@ dev = [
     "pytest>=8.0",          # 单元测试
     "pytest-asyncio>=0.23", # 异步测试支持
 ]
+benchmark = [
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<3",
+    "scikit-learn>=1.6,<2",
+    "torch>=2.7,<3",
+]
 
 # ---- Ruff：统一代码风格 ----
 [tool.ruff]

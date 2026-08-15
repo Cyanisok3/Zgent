@@ -44,6 +44,14 @@ test("statusPresentation prioritizes actionable incident", () => {
   assert.equal(status.icon, "warning");
 });
 
+// 功能：验证 operator action 状态明确提示用户处理后重检
+// 设计：用 action_required 快照锁定状态栏文案和提示语义
+test("statusPresentation exposes operator action", () => {
+  const status = statusPresentation(true, snapshot("failed", "action_required"));
+  assert.equal(status.text, "Action required");
+  assert.match(status.tooltip, /recheck/i);
+});
+
 // 功能：验证长日志恢复只请求有界尾部且终端换行稳定
 // 设计：直接测试 cursor 和文本纯函数，避免伪造 daemon 日志结果
 test("terminal helpers bound the initial replay", () => {
@@ -69,9 +77,22 @@ test("diagnosisMarkdown renders evidence", () => {
         description: "torch.load raised CUDA error",
       },
     ],
+    recovery: {
+      kind: "operator_action",
+      summary: "Install a CPU-compatible checkpoint.",
+      actions: [
+        {
+          target: "model.pt",
+          instruction: "Replace the CUDA-only checkpoint.",
+          verification: "Recheck the workflow.",
+        },
+      ],
+    },
   };
   const rendered = diagnosisMarkdown(value);
   assert.match(rendered, /CUDA checkpoint/);
   assert.match(rendered, /90%/);
   assert.match(rendered, /stderr:0-120/);
+  assert.match(rendered, /operator_action/);
+  assert.match(rendered, /Recheck the workflow/);
 });

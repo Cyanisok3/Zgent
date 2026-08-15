@@ -180,6 +180,11 @@ class _IncidentProvider:
                             "root_cause": "The script prints boom and exits with status 2.",
                             "evidence": self._evidence,
                             "confidence": 1.0,
+                            "recovery": {
+                                "kind": "patch",
+                                "summary": "Apply the minimal causal source fix.",
+                                "actions": [],
+                            },
                         },
                     )
                 ],

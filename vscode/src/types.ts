@@ -1,4 +1,4 @@
-export const WIRE_PROTOCOL_VERSION = 1;
+export const WIRE_PROTOCOL_VERSION = 2;
 
 export type JsonObject = Record<string, unknown>;
 
@@ -26,6 +26,14 @@ export interface LaunchPreview {
   executable: string;
   config_paths: string[];
   fingerprint: string;
+  workflow?: WorkflowSummary | null;
+}
+
+export interface WorkflowSummary {
+  version: number;
+  artifact_count: number;
+  check_count: number;
+  fingerprint: string;
 }
 
 export interface JobSnapshot {
@@ -38,6 +46,7 @@ export interface JobSnapshot {
   };
   argv: string[];
   workspace_root: string;
+  workflow?: WorkflowSummary | null;
   attempt?: {
     id: string;
     status: string;
@@ -45,6 +54,8 @@ export interface JobSnapshot {
     finished_at?: string | null;
     returncode?: number | null;
     signal?: number | null;
+    phase?: "preflight" | "main" | "postflight";
+    check_id?: string | null;
   } | null;
   incident?: {
     id: string;
@@ -58,6 +69,7 @@ export interface JobSnapshot {
     root_cause: string;
     confidence: number;
     evidence: EvidenceRef[];
+    recovery?: Recovery | null;
   } | null;
   proposal?: {
     id: string;
@@ -69,9 +81,19 @@ export interface JobSnapshot {
 }
 
 export interface EvidenceRef {
-  source: "stdout" | "stderr" | "workspace";
+  source: "stdout" | "stderr" | "workspace" | "contract";
   reference: string;
   description: string;
+}
+
+export interface Recovery {
+  kind: "patch" | "operator_action" | "none";
+  summary: string;
+  actions: Array<{
+    target?: string | null;
+    instruction: string;
+    verification: string;
+  }>;
 }
 
 export interface IncidentReview {
@@ -119,6 +141,9 @@ export function statusPresentation(
   if (incident === "awaiting_approval") {
     return { text: "Action required", tooltip: "A proposed fix is ready for review", icon: "warning" };
   }
+  if (incident === "action_required") {
+    return { text: "Action required", tooltip: "Complete the operator actions, then recheck the workflow", icon: "warning" };
+  }
   if (incident === "resolved") {
     return { text: "Resolved", tooltip: "The original training command succeeded", icon: "check" };
   }
@@ -140,6 +165,16 @@ export function diagnosisMarkdown(snapshot: JobSnapshot): string {
   const evidence = diagnosis.evidence
     .map((item) => `- **${item.source}** — ${item.description}\n  - \`${item.reference}\``)
     .join("\n");
+  const recovery = diagnosis.recovery === null || diagnosis.recovery === undefined
+    ? "Legacy diagnosis: no structured recovery is available."
+    : [
+      `**Kind:** ${diagnosis.recovery.kind}`,
+      diagnosis.recovery.summary,
+      ...diagnosis.recovery.actions.map((action) => (
+        `- ${action.target === null || action.target === undefined ? "" : `**${action.target}:** `}`
+        + `${action.instruction}\n  - Verify: ${action.verification}`
+      )),
+    ].join("\n\n");
   return [
     "# cyan diagnosis",
     "",
@@ -157,6 +192,10 @@ export function diagnosisMarkdown(snapshot: JobSnapshot): string {
     "## Evidence",
     "",
     evidence || "No evidence is available.",
+    "",
+    "## Recovery",
+    "",
+    recovery,
     "",
   ].join("\n");
 }

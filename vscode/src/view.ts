@@ -96,27 +96,41 @@ export class CyanTreeProvider implements vscode.TreeDataProvider<CyanNode> {
       ? "training"
       : path.basename(snapshot.argv[0]);
     const running = isActiveJob(snapshot);
+    const phase = snapshot.attempt?.phase;
+    const phaseDescription = phase === undefined
+      ? snapshot.job.status
+      : `${snapshot.job.status} · ${phase}${snapshot.attempt?.check_id ? `/${snapshot.attempt.check_id}` : ""}`;
+    const children: CyanNode[] = [
+      {
+        kind: "detail",
+        label: snapshot.job.id,
+        description: snapshot.attempt?.id,
+        tooltip: snapshot.workspace_root,
+      },
+      {
+        kind: "action",
+        label: "Show Training Log",
+        command: { command: "cyan.showLog", title: "Show Log" },
+        icon: "terminal",
+      },
+    ];
+    if (snapshot.workflow !== null && snapshot.workflow !== undefined) {
+      children.splice(1, 0, {
+        kind: "detail",
+        label: "Workflow Contract",
+        description: `${snapshot.workflow.artifact_count} artifacts · ${snapshot.workflow.check_count} checks`,
+        tooltip: snapshot.workflow.fingerprint,
+        icon: "checklist",
+      });
+    }
     return {
       kind: "job",
       label: "Active Job",
-      description: `${executable} · ${snapshot.job.status}`,
+      description: `${executable} · ${phaseDescription}`,
       tooltip: snapshot.argv.join(" "),
       contextValue: running && !this.actionInFlight ? "cyan.job.running" : "cyan.job",
       icon: running ? "sync~spin" : "terminal",
-      children: [
-        {
-          kind: "detail",
-          label: snapshot.job.id,
-          description: snapshot.attempt?.id,
-          tooltip: snapshot.workspace_root,
-        },
-        {
-          kind: "action",
-          label: "Show Training Log",
-          command: { command: "cyan.showLog", title: "Show Log" },
-          icon: "terminal",
-        },
-      ],
+      children,
     };
   }
 
@@ -163,6 +177,23 @@ export class CyanTreeProvider implements vscode.TreeDataProvider<CyanNode> {
           : (applicable ? "cyan.proposal.applicable" : "cyan.proposal.reviewOnly"),
         command: { command: "cyan.reviewProposal", title: "Review Proposed Fix" },
         icon: "diff",
+      });
+    }
+    if (incident.status === "action_required") {
+      for (const action of snapshot.diagnosis?.recovery?.actions ?? []) {
+        children.push({
+          kind: "detail",
+          label: action.instruction,
+          description: action.target ?? undefined,
+          tooltip: `Verify: ${action.verification}`,
+          icon: "person",
+        });
+      }
+      children.push({
+        kind: "action",
+        label: "Recheck Workflow",
+        command: { command: "cyan.recheckWorkflow", title: "Recheck Workflow" },
+        icon: "refresh",
       });
     }
     return {

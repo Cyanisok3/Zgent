@@ -1,4 +1,4 @@
-.PHONY: lint test integration-test docs verify-s0
+.PHONY: lint test integration-test docs benchmark-ci verify-s0
 
 lint:
 	uv run ruff check src tests scripts
@@ -12,6 +12,9 @@ integration-test:
 
 docs:
 	uv run python scripts/gen_protocol_doc.py
+
+benchmark-ci:
+	uv run pytest tests/unit/test_evidence_benchmark.py -v
 
 verify-s0:
 	uv sync --frozen

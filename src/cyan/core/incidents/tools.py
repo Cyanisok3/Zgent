@@ -13,6 +13,7 @@ from cyan.core.incidents.models import (
     DiagnosisCategory,
     EvidenceRef,
     Proposal,
+    Recovery,
 )
 from cyan.core.incidents.patch import (
     PatchError,
@@ -53,6 +54,7 @@ class SubmitDiagnosisParams(BaseModel):
     root_cause: str = Field(min_length=1, max_length=8000)
     evidence: list[EvidenceRef] = Field(min_length=1, max_length=32)
     confidence: float = Field(ge=0.0, le=1.0)
+    recovery: Recovery
 
 
 # 将业务校验错误统一转换为不可重试的工具结果
@@ -150,7 +152,7 @@ class ProposePatchTool(BaseTool):
                     "properties": {
                         "source": {
                             "type": "string",
-                            "enum": ["stdout", "stderr", "workspace"],
+                            "enum": ["stdout", "stderr", "workspace", "contract"],
                         },
                         "reference": {"type": "string"},
                         "description": {"type": "string"},
@@ -195,6 +197,8 @@ class ProposePatchTool(BaseTool):
                 raise PatchError(
                     "submit_diagnosis must succeed before propose_patch"
                 ) from exc
+            if diagnosis.recovery is None or diagnosis.recovery.kind != "patch":
+                raise PatchError("propose_patch requires recovery.kind=patch")
             target = resolve_workspace_path(
                 self._workspace_root,
                 parsed_params.path,
@@ -326,7 +330,7 @@ class SubmitDiagnosisTool(BaseTool):
                     "properties": {
                         "source": {
                             "type": "string",
-                            "enum": ["stdout", "stderr", "workspace"],
+                            "enum": ["stdout", "stderr", "workspace", "contract"],
                         },
                         "reference": {"type": "string"},
                         "description": {"type": "string"},
@@ -335,6 +339,29 @@ class SubmitDiagnosisTool(BaseTool):
                 },
             },
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "recovery": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["patch", "operator_action", "none"],
+                    },
+                    "summary": {"type": "string"},
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "target": {"type": "string"},
+                                "instruction": {"type": "string"},
+                                "verification": {"type": "string"},
+                            },
+                            "required": ["instruction", "verification"],
+                        },
+                    },
+                },
+                "required": ["kind", "summary", "actions"],
+            },
         },
         "required": [
             "category",
@@ -342,6 +369,7 @@ class SubmitDiagnosisTool(BaseTool):
             "root_cause",
             "evidence",
             "confidence",
+            "recovery",
         ],
     }
 
@@ -371,6 +399,7 @@ class SubmitDiagnosisTool(BaseTool):
             root_cause=parsed.root_cause,
             evidence=parsed.evidence,
             confidence=parsed.confidence,
+            recovery=parsed.recovery,
             created_at=datetime.now(UTC),
         )
         self._store.write_diagnosis(diagnosis)

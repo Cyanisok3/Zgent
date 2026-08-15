@@ -46,7 +46,7 @@ async def test_launch_start_reuses_job_start_boundary(
         }
     )
     start = AsyncMock(return_value=JobStartResult(job_id="job-1"))
-    monkeypatch.setattr(app, "_start_job", start)
+    monkeypatch.setattr(app, "_start_job_locked", start)
 
     result = await app._launch_start_handler(
         {
@@ -58,9 +58,10 @@ async def test_launch_start_reuses_job_start_boundary(
     )
 
     assert result.job_id == "job-1"
-    command = start.call_args.args[0]
+    command, contract = start.call_args.args
     assert command.env["BASE"] == "value"
     assert command.env["MODE"] == "test"
+    assert contract is None
 
 
 # 功能：验证环境变化会令已确认的 launch preview 失效
@@ -84,3 +85,44 @@ async def test_launch_start_rejects_stale_preview(tmp_path: Path) -> None:
                 "preview_fingerprint": preview.fingerprint,
             }
         )
+
+
+# 功能：验证 preview 后 Contract 变化会在任何 Job 创建前被拒绝
+# 设计：固定命令和环境，只修改 workflow.toml rule 并监视最终启动边界零调用
+async def test_launch_start_rejects_changed_workflow_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = tmp_path / ".cyan" / "workflow.toml"
+    contract.parent.mkdir()
+    contract.write_text(
+        'version = 1\n[[artifacts]]\npath = "input.csv"\nrole = "input"\nmin_bytes = 1\n',
+        encoding="utf-8",
+    )
+    app = CoreApp()
+    environment = {"PATH": os.environ["PATH"]}
+    preview = await app._launch_preview_handler(
+        {
+            "command": f"{sys.executable} train.py",
+            "workspace_root": str(tmp_path),
+            "env": environment,
+        }
+    )
+    start = AsyncMock(return_value=JobStartResult(job_id="job-1"))
+    monkeypatch.setattr(app, "_start_job_locked", start)
+    contract.write_text(
+        'version = 1\n[[artifacts]]\npath = "input.csv"\nrole = "input"\nmin_bytes = 2\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HandlerError, match="preview is stale"):
+        await app._launch_start_handler(
+            {
+                "command": f"{sys.executable} train.py",
+                "workspace_root": str(tmp_path),
+                "env": environment,
+                "preview_fingerprint": preview.fingerprint,
+            }
+        )
+
+    start.assert_not_awaited()

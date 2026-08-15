@@ -1,10 +1,11 @@
 # cyan
 
-cyan 是一个面向本地机器学习训练崩溃的 Incident Agent。训练正常运行时，daemon 只监管
-真实进程并持久化 stdout/stderr，不调用 LLM；进程非零退出后才唤醒受限 Agent，基于日志和
-当前仓库证据给出诊断与可选补丁。补丁必须经过用户明确批准，并由原训练命令完成最终验证。
+cyan 是一个本地 Data/ML workflow failure diagnosis & recovery harness。daemon 监管用户拥有
+的一条 opaque command，并可依据 `.cyan/workflow.toml` 检查输入、输出和自定义前后置检查。
+明确的输入/配置缺失直接给出人工动作，不调用 LLM；需要解释根因时才唤醒受限 Incident Agent。
+恢复可以是受控补丁、结构化人工动作或明确不处理，最终都必须完整重跑被冻结的 workflow。
 
-cyan 不做论文检索、指标优化、超参数搜索或 AutoResearch。
+cyan 不做 DAG 调度、内部 stage 编排、论文检索、指标优化、超参数搜索或 AutoResearch。
 
 ## 快速开始
 
@@ -25,7 +26,7 @@ cd /path/to/your/ml-project
 /start
 ```
 
-cyan 会先展示 cwd、可执行文件、最终 argv、环境覆盖项和识别到的配置路径；`/start`
+cyan 会先展示 cwd、可执行文件、最终 argv、环境覆盖项、配置路径和 Contract 摘要；`/start`
 确认后才启动训练。训练失败后的 diagnosis、证据和 proposed diff 会显示在同一 TUI，
 批准、拒绝和取消训练使用当前状态下出现的上下文选择器。
 
@@ -65,18 +66,47 @@ bash scripts/train_local.sh
 cyan 只监视由自身启动的非交互进程，不附着用户在其他终端自行启动的任务。daemon 保存精确
 argv、cwd 和环境用于重跑；成为父进程不会主动限制训练可用的 CPU 或 GPU。
 
+## 可选 Workflow Contract
+
+在被监视项目根目录创建 `.cyan/workflow.toml`：
+
+```toml
+version = 1
+
+[[artifacts]]
+path = "data/train.csv"
+role = "input"
+required = true
+min_bytes = 1
+
+[[artifacts]]
+path = "outputs/model.pt"
+role = "output"
+required = true
+min_bytes = 1
+fresh = true
+
+[[checks]]
+id = "schema-check"
+phase = "preflight"
+argv = ["python", "checks/schema.py"]
+timeout_s = 60
+```
+
+Contract 只声明命令前后必须满足的条件，不描述 workflow 如何执行。artifact 仅支持 workspace
+内路径；checks 与主命令均是 trusted user-owned executables。`fresh=true` 只证明本轮更新了
+产物，内容正确性仍由 custom check 负责。Contract 在启动时与 argv/cwd/env 一起冻结。
+
 ## 故障闭环
 
 ```text
-真实非零退出
+preflight → main command → postflight
 → failure capsule
-→ 有界只读调查
+→ 确定性人工动作或有界只读调查
 → diagnosis
-→ 可选单文件 SEARCH/REPLACE
-→ harness 生成并校验 diff
-→ 用户审批
-→ 可选 smoke
-→ 原命令最终重跑
+→ patch / operator_action / none
+→ 明确审批或人工处理
+→ frozen full workflow 重跑
 ```
 
 Incident Agent 只注册：
@@ -123,6 +153,26 @@ RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部�
 仍保留在磁盘。IPC 客户端使用独立有界队列，慢客户端不会阻塞训练日志落盘。daemon 配置在
 启动时固定；切换依赖不同项目配置的 workspace 前需要重启 daemon。
 
+## Evidence Retrieval Benchmark
+
+仓库包含独立的长日志证据检索评测，不改变生产 Incident Agent。它提供固定 Case/Gold/
+EvidenceBundle schema、48 个真实 Pandas/scikit-learn/PyTorch CPU 受控 Case、LogDx-CI v1.2、
+LogHub 规模压力集、六个检索基线、完整资源指标、双人盲审接口和 GP 候选特征导出。
+
+```bash
+uv run python scripts/benchmark_evidence.py prepare \
+  --corpus /private/tmp/cyan-benchmark-ci --profile ci
+uv run python scripts/benchmark_evidence.py run \
+  --corpus /private/tmp/cyan-benchmark-ci \
+  --method heuristic_hybrid --output benchmark-results/hybrid.run.json
+```
+
+完整 Cyan Core 要求另外导入12个具有公开 commit 对或 issue + revision 对、失败/成功双重放
+凭证的历史故障，并完成 test Gold 双人审核；当前15个 Defects4ML 候选仅6个合格，因此
+complete-core gate 按设计失败。真实 workload
+依赖通过 `uv sync --group benchmark` 单独安装，不进入生产依赖。完整说明见
+[Benchmark README](benchmarks/evidence_retrieval/README.md)。
+
 ## 当前验证范围
 
 当前本地 CPU/PyTorch Pilot 的最新回归结果为：
@@ -133,7 +183,9 @@ RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部�
 - 非代码故障 6/6 未产生 proposal；
 - 批准前 tracked 写入和不可应用 proposal 到达审批均为 0。
 
-结果只证明 macOS、CPU、PyTorch 和明确异常退出场景，不外推到 CUDA、NCCL、多机训练、
+Workflow Contract 的解析、freshness、阶段执行、零 LLM 路由和 frozen retry 已由自动化测试
+覆盖；Benchmark 已运行48个真实受控 Data/ML Case，但尚未通过生产 Incident Agent 完成新一轮
+LLM Pilot。既有 Agent 结果只证明 macOS、CPU、PyTorch 和明确异常退出场景，不外推到 CUDA、NCCL、多机训练、
 OOM、进程挂死、系统休眠或静默收敛故障。完整方法和限制见
 [USER_TEST_REPORT.md](USER_TEST_REPORT.md)。
 

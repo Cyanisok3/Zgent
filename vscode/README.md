@@ -17,7 +17,10 @@ Set `cyan.executablePath` when `cyan` is not available on the VS Code extension 
 2. Open the cyan Activity Bar view.
 3. Select **Start monitored training**, paste one logical training command, and review the deterministic preview.
 4. Read the real training output in the bottom `cyan` terminal.
-5. When an Incident is ready, open diagnosis evidence and the native diff, then use the contextual Approve or Reject action.
+5. When an Incident is ready, open diagnosis evidence and recovery. Review and approve a patch, or complete the listed operator actions and select **Recheck Workflow**.
+
+The preview and Job tree show the optional frozen Workflow Contract summary and current
+preflight/main/postflight phase. VS Code never parses or persists workflow state itself.
 
 Closing VS Code or the cyan terminal only detaches the client. It does not cancel the daemon-owned training process.
 

@@ -26,15 +26,20 @@ of appending version-by-version narratives; keep historical migration notes out 
 
 ## Product boundary
 
-cyan is a local ML-training Incident Agent, not an AutoResearch system.
+cyan is a local Data/ML workflow failure diagnosis and recovery harness, not an orchestrator or
+AutoResearch system.
 
-- During training, the daemon only supervises the real process and persists stdout/stderr.
-- A non-zero exit or unexpected signal creates a failure capsule and wakes a fresh read-only Agent.
+- The user owns one opaque workflow command; cyan does not model a DAG or internal stages.
+- An optional `.cyan/workflow.toml` declares pre/post artifact rules and trusted user-owned checks.
+- A non-zero main exit, failed check, or artifact contract violation creates a failure capsule.
+- Deterministic missing input/config artifacts become `action_required` without an LLM call.
 - The Agent may diagnose a crash and propose one exact single-file SEARCH/REPLACE, but it cannot
   write the workspace, generate executable diff syntax, or run shell.
+- Recovery is explicit: `patch`, structured `operator_action`, or `none`.
 - One explicit approval lets the harness validate and apply that proposal.
-- A user-declared smoke verifier is optional; the original command is always the final verifier.
-- v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
+- A user-declared smoke verifier is optional; the frozen full workflow is always the final verifier.
+- cyan does not perform paper search, metric optimization, hyperparameter search, experiment loops,
+  DAG scheduling, external artifact storage, or partial-stage retries.
 
 The default product surface is the TUI. Normal users need only:
 
@@ -44,8 +49,8 @@ cyan
 ```
 
 `cyan watch -- <argv>` remains a compatibility entrypoint. The remaining CLI commands are
-development diagnostics and must not complicate the primary help. `/monitor` is client-local:
-the harness parses and previews the command without an Agent or shell, then reuses `job.start`.
+development diagnostics and must not complicate the primary help. `/monitor` uses daemon-owned
+`launch.preview` and `launch.start`, so command and Contract fingerprints have one authority.
 Typing `/` must show keyboard-selectable local commands and ordinary chat skills. Ordinary chat
 permission requests use the existing `permission.*` events and `permission.respond`; this must not
 broaden the read-only Incident profile. Patch approval, rejection, and running-job cancellation are
@@ -90,8 +95,10 @@ uv run python scripts/gen_protocol_doc.py --check
 
 `JobSupervisor` is the only owner of long-running process groups. It uses
 `asyncio.create_subprocess_exec`, separate stdout/stderr drains, and exact persisted argv/cwd/env
-for retries. It must never use the generic 120-second `BashTool`.
-Daemon-owned training and smoke processes use `DEVNULL` stdin; watched jobs are non-interactive.
+plus the normalized Workflow Contract for retries. Preflight checks, the main command, and
+postflight checks are trusted user-owned executables but still share this process boundary. It must
+never use the generic 120-second `BashTool`. Daemon-owned workflow, check, and smoke processes use
+`DEVNULL` stdin; watched jobs are non-interactive.
 
 `JobStore` persists:
 
@@ -104,7 +111,8 @@ Daemon-owned training and smoke processes use `DEVNULL` stdin; watched jobs are 
 └── incidents/<incident_id>/...
 ```
 
-`launch.json` is private (`0600`) and must not be returned by RPC or exposed to the Agent.
+`launch.json` is private (`0600`) and must not be returned by RPC or exposed to the Agent. It freezes
+the optional Contract snapshot; retry must never reread `.cyan/workflow.toml`.
 
 ### Incident harness (`src/cyan/core/incidents/`)
 
@@ -117,10 +125,11 @@ read_file, list_dir, search_text, read_job_log, submit_diagnosis, propose_patch
 
 Do not register write, shell, MCP, Skill, TaskManager, or subagent tools for Incident sessions.
 Do not load global/project context or session notes, and do not let slash commands or manual
-compaction override this profile. v1 must not start configured MCP servers.
+compaction override this profile. Incident sessions must not start configured MCP servers.
 
-`propose_patch` requires matching workspace evidence, performs one exact unique replacement in
-memory, and writes the harness-generated diff as an artifact only. v1 edits one existing UTF-8 text
+`submit_diagnosis` must select `patch`, `operator_action`, or `none`. `propose_patch` is legal only
+for `patch` recovery, requires matching workspace evidence, performs one exact unique replacement in
+memory, and writes the harness-generated diff as an artifact only. One recovery proposal edits one existing UTF-8 text
 file of at most 1 MiB; it does not create, delete, rename, or fuzzily match files. `PatchService`
 owns hash checks, path checks, `git apply --check`, application, and safe reverse application.
 
@@ -152,6 +161,27 @@ timeout_s = 300
 ```
 
 The Agent may not modify this file.
+
+The optional workflow contract is also Agent-protected:
+
+```toml
+version = 1
+
+[[artifacts]]
+path = "data/train.csv"
+role = "input"
+required = true
+min_bytes = 1
+
+[[checks]]
+id = "schema"
+phase = "preflight"
+argv = ["python", "checks/schema.py"]
+timeout_s = 60
+```
+
+Artifact paths are workspace-relative. Internal symlinks are allowed only when their real path stays
+inside the workspace. `fresh=true` is limited to required outputs and proves update, not correctness.
 
 An active smoke verifier persists `smoke-execution.json` with PID and process identity. On daemon
 recovery, terminate it only after PID, identity, session leader, and process-group leader all match;

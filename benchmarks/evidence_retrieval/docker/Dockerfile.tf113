@@ -1,0 +1,9 @@
+FROM tensorflow/tensorflow@sha256:47e7e3f536f8884218818dfd491387978189101deced7b46b191df19c15298c2
+
+RUN python -m pip install --no-cache-dir --no-deps \
+    Keras==2.2.4 \
+    Keras-Applications==1.0.8 \
+    Keras-Preprocessing==1.1.2 \
+    PyYAML==5.3.1 \
+    scipy==1.3.3 && \
+    python -c 'import keras; print(keras.__version__)'

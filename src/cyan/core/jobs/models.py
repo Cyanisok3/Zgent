@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cyan.core.jobs.workflow import ArtifactMetadata, WorkflowContract, WorkflowPhase
+
 JobStatus = Literal[
     "starting",
     "running",
@@ -37,6 +39,7 @@ class JobSpec(BaseModel):
     argv: list[str] = Field(min_length=1)
     workspace_root: Path
     env: dict[str, str] = Field(default_factory=dict)
+    workflow_contract: WorkflowContract | None = None
 
 
 class JobRecord(BaseModel):
@@ -59,17 +62,33 @@ class AttemptRecord(BaseModel):
     returncode: int | None = None
     signal: int | None = None
     error: str | None = None
+    phase: WorkflowPhase = "main"
+    check_id: str | None = None
+    artifact_baseline: list[ArtifactMetadata] = Field(default_factory=list)
 
 
 class FailureRecord(BaseModel):
     job_id: str
     attempt_id: str
     occurred_at: str
-    kind: Literal["launch_error", "process_exit", "supervisor_error"]
+    kind: Literal[
+        "launch_error",
+        "process_exit",
+        "supervisor_error",
+        "contract_violation",
+    ]
     returncode: int | None = None
     signal: int | None = None
     message: str
     capsule: dict[str, Any] | None = None
+    phase: WorkflowPhase | None = None
+    check_id: str | None = None
+    artifact_path: str | None = None
+    contract_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    violation_rule: str | None = None
 
 
 class JobEvent(BaseModel):
