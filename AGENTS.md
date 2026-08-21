@@ -34,7 +34,6 @@ cyan is a local ML-training Incident Agent, not an AutoResearch system.
   write the workspace, generate executable diff syntax, or run shell.
 - One explicit approval lets the harness validate and apply that proposal.
 - A user-declared smoke verifier is optional; the original command is always the final verifier.
-- v1 does not perform paper search, metric optimization, hyperparameter search, or experiment loops.
 
 The default product surface is the TUI. Normal users need only:
 

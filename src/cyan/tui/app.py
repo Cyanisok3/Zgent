@@ -60,7 +60,6 @@ _STATUS_LABELS = {
     "smoke_running": "Running the optional smoke verifier",
     "smoke_passed": "Smoke verifier passed",
     "smoke_skipped": "Smoke verifier skipped",
-    "smoke_failed": "Smoke verifier failed; patch rollback requested",
     "retry_running": "Re-running the original command",
     "resolved": "Original command completed successfully",
     "rejected": "Patch rejected",

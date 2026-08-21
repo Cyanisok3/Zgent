@@ -123,6 +123,48 @@ RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部�
 仍保留在磁盘。IPC 客户端使用独立有界队列，慢客户端不会阻塞训练日志落盘。daemon 配置在
 启动时固定；切换依赖不同项目配置的 workspace 前需要重启 daemon。
 
+### Incident 状态机
+
+状态流转由 `src/cyan/core/incidents/fsm.py` 的声明式转移表作为单一事实源；该图由
+`fsm.render_mermaid()` 从同一张表生成，运行时校验、文档与测试永不漂移：
+
+```mermaid
+stateDiagram-v2
+    [*] --> diagnosing
+
+    diagnosing --> awaiting_approval: INVESTIGATION_DONE
+    diagnosing --> unresolved: INVESTIGATION_FAILED
+
+    awaiting_approval --> applying: APPROVE
+    awaiting_approval --> stale: APPROVE_INVALIDATED
+    awaiting_approval --> rejected: REJECT
+    awaiting_approval --> diagnosing: FOLLOW_UP
+
+    applying --> smoke_running: APPLY_OK_SMOKE
+    applying --> smoke_skipped: APPLY_OK_NO_SMOKE
+    applying --> stale: APPLY_FAILED
+    applying --> diagnosing: SMOKE_FAILED_ROLLED_BACK
+    applying --> rollback_blocked: SMOKE_FAILED_ROLLBACK_BLOCKED
+
+    smoke_running --> smoke_passed: SMOKE_PASSED
+    smoke_running --> diagnosing: SMOKE_FAILED_ROLLED_BACK
+    smoke_running --> rollback_blocked: SMOKE_FAILED_ROLLBACK_BLOCKED
+
+    smoke_passed --> retry_running: RETRY_STARTED
+    smoke_skipped --> retry_running: RETRY_STARTED
+
+    retry_running --> resolved: RETRY_SUCCEEDED
+    retry_running --> diagnosing: RETRY_FAILED
+    retry_running --> unresolved: RETRY_ABORTED
+
+    stale --> diagnosing: FOLLOW_UP
+    unresolved --> diagnosing: FOLLOW_UP
+    rollback_blocked --> diagnosing: FOLLOW_UP
+
+    resolved --> [*]
+    rejected --> [*]
+```
+
 ## 当前验证范围
 
 当前本地 CPU/PyTorch Pilot 的最新回归结果为：

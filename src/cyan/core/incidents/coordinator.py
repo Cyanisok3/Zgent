@@ -20,6 +20,7 @@ from cyan.core.bus.events import (
     SmokeFinishedEvent,
 )
 from cyan.core.events.bus import EventBus
+from cyan.core.incidents.fsm import Event, accepts, recover_action, transition
 from cyan.core.incidents.log_tool import (
     FileJobLogReader,
     JobLogReader,
@@ -79,22 +80,6 @@ _SAFE_ENV_NAMES = frozenset(
 )
 _SAFE_ENV_PREFIXES = ("CUDA_", "NCCL_", "TORCH_")
 _SECRET_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH", "COOKIE", "KEY")
-_FOLLOW_UP_STATUSES: frozenset[IncidentStatus] = frozenset(
-    {
-        "awaiting_approval",
-        "stale",
-        "unresolved",
-        "rollback_blocked",
-    }
-)
-_RECOVERY_UNCERTAIN_STATUSES: frozenset[IncidentStatus] = frozenset(
-    {
-        "applying",
-        "smoke_running",
-        "smoke_passed",
-        "smoke_skipped",
-    }
-)
 _WORKSPACE_REFERENCE = re.compile(
     r"^(?P<identity>.+@sha256:[0-9a-f]{64})#L"
     r"(?P<start>[1-9][0-9]*)(?:-L(?P<end>[1-9][0-9]*))?$"
@@ -430,6 +415,44 @@ class IncidentCoordinator:
             )
         )
 
+    # 校验事件在当前状态合法后写入并广播；非法转移抛 IllegalTransitionError
+    async def _dispatch(
+        self,
+        store: IncidentStore,
+        incident: Incident,
+        event: Event,
+    ) -> IncidentStatus:
+        next_status = transition(incident.status, event)
+        await self._set_status(store, incident, next_status)
+        return next_status
+
+    # 在锁内把 retry_running 收敛为单次复诊；已离开该状态时幂等跳过
+    async def _reinvestigate(
+        self,
+        store: IncidentStore,
+        incident: Incident,
+        message: str,
+        *,
+        attempt_id: str | None = None,
+        failure_path: str | None = None,
+    ) -> None:
+        lock = self._decision_locks.setdefault(incident.id, asyncio.Lock())
+        async with lock:
+            current = store.read_incident(incident.id)
+            if current.status != "retry_running":
+                return
+            if attempt_id is not None:
+                current.attempt_id = attempt_id
+            if failure_path is not None:
+                current.failure_path = failure_path
+            current.active_proposal_id = None
+            store.clear_agent_artifacts(current.id)
+            await self._dispatch(store, current, Event.RETRY_FAILED)
+            self._spawn(
+                self._run_diagnosis(store, current, message),
+                f"incident-reinvestigate-{current.id}",
+            )
+
     # 处理真实进程失败：新建或恢复同一个 Incident，并自动唤醒只读 Agent
     async def handle_failure(
         self,
@@ -445,20 +468,14 @@ class IncidentCoordinator:
             return
         if latest is not None and latest[1].status == "retry_running":
             store, incident = latest
-            incident.attempt_id = attempt.id
-            incident.failure_path = str(
-                self._jobs.attempt_dir(job.id, attempt.id) / "failure.json"
-            )
-            incident.active_proposal_id = None
-            store.clear_agent_artifacts(incident.id)
-            await self._set_status(store, incident, "diagnosing")
-            self._spawn(
-                self._run_diagnosis(
-                    store,
-                    incident,
-                    "The patched full training command failed. Reinvestigate this same incident.",
+            await self._reinvestigate(
+                store,
+                incident,
+                "The patched full training command failed. Reinvestigate this same incident.",
+                attempt_id=attempt.id,
+                failure_path=str(
+                    self._jobs.attempt_dir(job.id, attempt.id) / "failure.json"
                 ),
-                f"incident-rediagnose-{incident.id}",
             )
             return
 
@@ -511,7 +528,7 @@ class IncidentCoordinator:
         run_id: str | None = None,
     ) -> None:
         if incident.session_id is None:
-            await self._set_status(store, incident, "unresolved")
+            await self._dispatch(store, incident, Event.INVESTIGATION_FAILED)
             return
         run_id = run_id or new_run_id()
         incident.active_run_id = run_id
@@ -524,20 +541,20 @@ class IncidentCoordinator:
         try:
             diagnosis = store.read_diagnosis(incident.id)
         except (FileNotFoundError, ValueError):
-            await self._set_status(store, incident, "unresolved")
+            await self._dispatch(store, incident, Event.INVESTIGATION_FAILED)
             return
         try:
             proposal = store.read_proposal(incident.id)
         except (FileNotFoundError, ValueError):
             incident.active_proposal_id = None
-            await self._set_status(store, incident, "unresolved")
+            await self._dispatch(store, incident, Event.INVESTIGATION_FAILED)
             return
         if proposal.diagnosis_id != diagnosis.id:
             incident.active_proposal_id = None
-            await self._set_status(store, incident, "unresolved")
+            await self._dispatch(store, incident, Event.INVESTIGATION_FAILED)
             return
         incident.active_proposal_id = proposal.id
-        await self._set_status(store, incident, "awaiting_approval")
+        await self._dispatch(store, incident, Event.INVESTIGATION_DONE)
         await self._bus.publish(
             PatchProposedEvent(
                 job_id=incident.job_id,
@@ -815,7 +832,7 @@ class IncidentCoordinator:
             if incident.active_proposal_id != proposal_id:
                 raise ValueError("proposal is not active")
             if decision == "reject":
-                await self._set_status(store, incident, "rejected")
+                await self._dispatch(store, incident, Event.REJECT)
                 return incident.status
 
             proposal = store.read_proposal(incident.id)
@@ -827,7 +844,7 @@ class IncidentCoordinator:
                 try:
                     smoke_config = load_smoke_verifier(spec.workspace_root)
                 except (OSError, ValueError):
-                    await self._set_status(store, incident, "stale")
+                    await self._dispatch(store, incident, Event.APPROVE_INVALIDATED)
                     return incident.status
                 observed_fingerprint = (
                     smoke_verifier_fingerprint(smoke_config)
@@ -835,15 +852,15 @@ class IncidentCoordinator:
                     else None
                 )
                 if observed_fingerprint != smoke_config_fingerprint:
-                    await self._set_status(store, incident, "stale")
+                    await self._dispatch(store, incident, Event.APPROVE_INVALIDATED)
                     return incident.status
 
-            await self._set_status(store, incident, "applying")
+            await self._dispatch(store, incident, Event.APPROVE)
             patch_service = PatchService(spec.workspace_root)
             try:
                 receipt = await patch_service.apply(proposal, store.patch_path(proposal))
             except (OSError, PatchError, ValueError):
-                await self._set_status(store, incident, "stale")
+                await self._dispatch(store, incident, Event.APPLY_FAILED)
                 return incident.status
             store.write_receipt(incident.id, receipt)
 
@@ -858,13 +875,13 @@ class IncidentCoordinator:
                 if not smoke_ok:
                     return store.read_incident(incident.id).status
             else:
-                await self._set_status(store, incident, "smoke_skipped")
+                await self._dispatch(store, incident, Event.APPLY_OK_NO_SMOKE)
 
-            await self._set_status(store, incident, "retry_running")
+            await self._dispatch(store, incident, Event.RETRY_STARTED)
             try:
                 retry_job = await self._supervisor.retry(incident.job_id)
             except RuntimeError:
-                await self._set_status(store, incident, "unresolved")
+                await self._dispatch(store, incident, Event.RETRY_ABORTED)
                 return incident.status
             if (
                 retry_job.status == "running"
@@ -921,7 +938,7 @@ class IncidentCoordinator:
                     started_at=_now(),
                 ),
             )
-            await self._set_status(store, incident, "smoke_running")
+            await self._dispatch(store, incident, Event.APPLY_OK_SMOKE)
 
         try:
             result = await self._smoke.run(
@@ -963,7 +980,7 @@ class IncidentCoordinator:
             )
         )
         if result.status == "passed":
-            await self._set_status(store, incident, "smoke_passed")
+            await self._dispatch(store, incident, Event.SMOKE_PASSED)
             return True
 
         proposal = store.read_proposal(incident.id)
@@ -971,11 +988,11 @@ class IncidentCoordinator:
         try:
             await patch_service.reverse(proposal, store.patch_path(proposal), receipt)
         except (OSError, PatchError, ValueError):
-            await self._set_status(store, incident, "rollback_blocked")
+            await self._dispatch(store, incident, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
             return False
         incident.active_proposal_id = None
         store.clear_agent_artifacts(incident.id)
-        await self._set_status(store, incident, "diagnosing")
+        await self._dispatch(store, incident, Event.SMOKE_FAILED_ROLLED_BACK)
         self._spawn(
             self._run_diagnosis(
                 store,
@@ -1066,14 +1083,17 @@ class IncidentCoordinator:
                 )
         if job.status == "succeeded":
             current = store.read_incident(incident.id)
-            await self._set_status(store, current, "resolved")
+            await self._dispatch(store, current, Event.RETRY_SUCCEEDED)
         elif job.status in ("cancelled", "interrupted"):
             current = store.read_incident(incident.id)
-            await self._set_status(store, current, "unresolved")
+            await self._dispatch(store, current, Event.RETRY_ABORTED)
         elif job.status == "failed":
+            if attempt is not None and attempt.returncode is not None:
+                # 进程非零退出由 handle_failure 统一复诊，这里避免双写者竞态
+                return
             current = store.read_incident(incident.id)
             if current.status == "retry_running":
-                await self._set_status(store, current, "unresolved")
+                await self._dispatch(store, current, Event.RETRY_ABORTED)
 
     # 判断一个 session 是否属于受控 Incident
     def is_incident_session(self, session_id: str) -> bool:
@@ -1088,13 +1108,13 @@ class IncidentCoordinator:
         lock = self._decision_locks.setdefault(incident.id, asyncio.Lock())
         async with lock:
             incident = store.read_incident(incident.id)
-            if incident.status not in _FOLLOW_UP_STATUSES:
+            if not accepts(incident.status, Event.FOLLOW_UP):
                 raise ValueError(
                     f"incident does not accept follow-up in state {incident.status}"
                 )
             incident.active_proposal_id = None
             store.clear_agent_artifacts(incident.id)
-            await self._set_status(store, incident, "diagnosing")
+            await self._dispatch(store, incident, Event.FOLLOW_UP)
             self._spawn(
                 self._run_diagnosis(
                     store,
@@ -1141,9 +1161,12 @@ class IncidentCoordinator:
                 ):
                     await self._recover_smoke(store, incident, smoke_execution)
                     continue
-                if incident.status in _RECOVERY_UNCERTAIN_STATUSES:
+                action = recover_action(incident.status)
+                if action == "quarantine":
                     incident.active_proposal_id = None
                     await self._set_status(store, incident, "unresolved")
+                    continue
+                if action == "keep":
                     continue
                 if incident.status == "awaiting_approval":
                     diagnosis = self._read_optional(

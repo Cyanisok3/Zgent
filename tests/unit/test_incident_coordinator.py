@@ -15,6 +15,7 @@ from cyan.core.incidents.coordinator import (
     IncidentCoordinator,
     _reference_was_observed,
 )
+from cyan.core.incidents.models import Incident
 from cyan.core.incidents.smoke import SmokeExecution
 from cyan.core.incidents.store import IncidentStore
 from cyan.core.jobs import JobSpec, JobStore, JobSupervisor
@@ -618,3 +619,38 @@ async def test_retry_launch_error_becomes_unresolved(tmp_path: Path) -> None:
         assert jobs.read_failure(job.id, "attempt-0002").kind == "launch_error"
     finally:
         await coordinator.close()
+
+
+# 功能：验证重跑失败复诊在重复触发下只推进一次，最终收敛为 diagnosing 且只产生一次后台诊断
+# 设计：直接落盘 retry_running Incident，替换 _run_diagnosis 为记录器并连发两次 _reinvestigate
+async def test_reinvestigate_converges_once(tmp_path: Path) -> None:
+    coordinator = IncidentCoordinator(None, None, None, EventBus())  # type: ignore[arg-type]
+    store = IncidentStore(tmp_path / "incidents")
+    now = datetime.now(UTC)
+    incident = Incident(
+        id="incident-1",
+        job_id="job-1",
+        attempt_id="attempt-2",
+        workspace_root=str(tmp_path),
+        failure_path="attempts/attempt-2/failure.json",
+        status="retry_running",
+        created_at=now,
+        updated_at=now,
+    )
+    store.write_incident(incident)
+
+    spawned: list[str] = []
+
+    async def record_diagnosis(
+        store_arg: IncidentStore, incident_arg: Incident, message: str
+    ) -> None:
+        spawned.append(message)
+
+    coordinator._run_diagnosis = record_diagnosis  # type: ignore[method-assign]
+
+    await coordinator._reinvestigate(store, incident, "reinvestigate once")
+    await coordinator._reinvestigate(store, incident, "reinvestigate twice")
+    await asyncio.gather(*list(coordinator._tasks))
+
+    assert store.read_incident("incident-1").status == "diagnosing"
+    assert spawned == ["reinvestigate once"]

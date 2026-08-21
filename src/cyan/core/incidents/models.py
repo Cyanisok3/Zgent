@@ -15,7 +15,6 @@ IncidentStatus = Literal[
     "smoke_running",
     "smoke_passed",
     "smoke_skipped",
-    "smoke_failed",
     "retry_running",
     "resolved",
     "rejected",
