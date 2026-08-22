@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from cyan.core.tools.builtin.bash import BashParams
-from cyan.core.tools.builtin.list_dir import ListDirParams
-from cyan.core.tools.builtin.note_save import NoteSaveParams
-from cyan.core.tools.builtin.read_file import ReadFileParams
-from cyan.core.tools.builtin.search_text import SearchTextParams
-from cyan.core.tools.builtin.write_file import WriteFileParams
+from cyan.agent.tools.builtin.bash import BashParams
+from cyan.agent.tools.builtin.list_dir import ListDirParams
+from cyan.agent.tools.builtin.note_save import NoteSaveParams
+from cyan.agent.tools.builtin.read_file import ReadFileParams
+from cyan.agent.tools.builtin.search_text import SearchTextParams
+from cyan.agent.tools.builtin.write_file import WriteFileParams
 
 
 # 功能：验证 BashParams 接受合法参数，缺省 timeout 为 60

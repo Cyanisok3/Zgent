@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cyan.core.task.model import Task
+from cyan.agent.task.model import Task
 
 
 # 功能：验证 Task.to_dict() 包含所有预期字段

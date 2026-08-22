@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from cyan.core.config import CyanConfig
-from cyan.core.transport.socket_client import SocketClient
+from cyan.config import CyanConfig
+from cyan.service.transport.socket_client import SocketClient
 
 _CORE_LIFECYCLE_TIMEOUT_SECONDS = 15.0
 _DAEMON_LOCK = Path("~/.cyan/cyan-core.lock").expanduser()
@@ -291,7 +291,7 @@ def cmd_core_start(config: CyanConfig, *, json_output: bool = False) -> None:
         return
     startup_log_cursor = _startup_log_cursor(config)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "cyan.core"],
+        [sys.executable, "-m", "cyan.service"],
         start_new_session=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

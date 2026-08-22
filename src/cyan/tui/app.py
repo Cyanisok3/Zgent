@@ -20,14 +20,14 @@ from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from cyan.core.jobs.launch import (
+from cyan.agent.skills.loader import SkillLoader
+from cyan.service.transport.socket_client import IpcError, SocketClient
+from cyan.training.jobs.launch import (
     LaunchParseError,
     ParsedLaunch,
     format_launch_preview,
     parse_training_command,
 )
-from cyan.core.skills.loader import SkillLoader
-from cyan.core.transport.socket_client import IpcError, SocketClient
 
 _LOCAL_SLASH_COMMANDS = (
     ("monitor", "enter ML training monitor mode"),

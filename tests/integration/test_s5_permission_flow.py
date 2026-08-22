@@ -11,11 +11,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from cyan.core.config import CyanConfig
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import LlmResponse, ToolCallBlock
-from cyan.core.permissions.manager import PermissionManager
-from cyan.core.runner import AgentRunner
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, ToolCallBlock
+from cyan.agent.permissions.manager import PermissionManager
+from cyan.agent.runner import AgentRunner
+from cyan.config import CyanConfig
 
 # ── stub providers ────────────────────────────────────────────────────────────
 

@@ -6,9 +6,9 @@ import sys
 import time
 
 import cyan
-from cyan.core.bus.commands import PongResult
-from cyan.core.bus.envelope import JsonRpcError, JsonRpcSuccess
-from cyan.core.config import CyanConfig
+from cyan.config import CyanConfig
+from cyan.service.protocol.commands import PongResult
+from cyan.service.protocol.envelope import JsonRpcError, JsonRpcSuccess
 
 
 # 同步入口：运行 ping 协程，连接失败时打印错误并退出

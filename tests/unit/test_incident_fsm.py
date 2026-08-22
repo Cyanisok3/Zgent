@@ -4,7 +4,7 @@ from typing import get_args
 
 import pytest
 
-from cyan.core.incidents.fsm import (
+from cyan.training.incidents.fsm import (
     RECOVERY,
     TERMINAL_STATES,
     TRANSITIONS,
@@ -15,7 +15,7 @@ from cyan.core.incidents.fsm import (
     render_mermaid,
     transition,
 )
-from cyan.core.incidents.models import IncidentStatus
+from cyan.training.incidents.models import IncidentStatus
 
 _ALL_STATES = set(get_args(IncidentStatus))
 _ALL_EVENTS = list(Event)

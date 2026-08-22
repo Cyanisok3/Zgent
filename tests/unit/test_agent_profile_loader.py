@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.agents.loader import AgentProfileLoader
+from cyan.agent.agents.loader import AgentProfileLoader
 
 
 # 功能：内建 planner 角色配置应能被 AgentProfileLoader 加载

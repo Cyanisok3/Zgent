@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from cyan.core.incidents.log_tool import LogStream, ReadJobLogTool
+from cyan.training.incidents.log_tool import LogStream, ReadJobLogTool
 
 
 class MemoryLogReader:

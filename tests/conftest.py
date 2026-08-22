@@ -32,7 +32,7 @@ async def running_daemon(
     env["CYAN_LOG_FILE"] = ""
     env["CYAN_LOG_LEVEL"] = "WARNING"
 
-    proc = subprocess.Popen([sys.executable, "-m", "cyan.core"], env=env)
+    proc = subprocess.Popen([sys.executable, "-m", "cyan.service"], env=env)
 
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:

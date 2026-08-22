@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from cyan.core.incidents.smoke import (
+from cyan.training.incidents.smoke import (
     SmokeVerifierConfig,
     SubprocessSmokeExecutor,
     load_smoke_verifier,

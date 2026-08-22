@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.bus.events import (
+from cyan.agent.events.bus import EventBus
+from cyan.agent.events.writer import EventWriter
+from cyan.service.protocol.events import (
     RunFinishedEvent,
     RunStartedEvent,
     ToolCallFailedEvent,
     ToolCallStartedEvent,
 )
-from cyan.core.events.bus import EventBus
-from cyan.core.events.writer import EventWriter
 
 
 # 功能：验证 handle 后事件被正确序列化为单行 JSONL 写入磁盘
@@ -95,7 +95,7 @@ async def test_event_writer_oserror_is_logged(
     path = tmp_path / "events.jsonl"
     event = RunStartedEvent(run_id="r1", goal="g", ts="2026-05-11T00:00:00Z")
 
-    with caplog.at_level(logging.ERROR, logger="cyan.core.events.writer"):
+    with caplog.at_level(logging.ERROR, logger="cyan.agent.events.writer"):
         async with EventWriter(path) as writer:
             assert writer._file is not None
             writer._file.close()

@@ -3,8 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.app import _config_log_data, _trace_event_data
-from cyan.core.bus.events import (
+from cyan.agent.trace.record import TraceRecord
+from cyan.agent.trace.writer import TraceWriter
+from cyan.config import CyanConfig, McpServerConfig
+from cyan.service.app import _config_log_data, _trace_event_data
+from cyan.service.protocol.events import (
     LlmTokenEvent,
     LogLineEvent,
     PatchProposedEvent,
@@ -17,9 +20,6 @@ from cyan.core.bus.events import (
     ToolCallFinishedEvent,
     ToolCallStartedEvent,
 )
-from cyan.core.config import CyanConfig, McpServerConfig
-from cyan.core.trace.record import TraceRecord
-from cyan.core.trace.writer import TraceWriter
 
 
 def _record(direction: str = "CORE", kind: str = "event") -> TraceRecord:

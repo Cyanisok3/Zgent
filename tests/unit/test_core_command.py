@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from cyan.cli.commands import core
-from cyan.core.config import CyanConfig
+from cyan.config import CyanConfig
 
 
 # 功能：验证后台 daemon 启动时不再继承调用终端的 stdin

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.jobs.models import FailureRecord, JobSpec
-from cyan.core.jobs.store import JobStore
-from cyan.core.jobs.supervisor import JobSupervisor
+from cyan.training.jobs.models import FailureRecord, JobSpec
+from cyan.training.jobs.store import JobStore
+from cyan.training.jobs.supervisor import JobSupervisor
 
 
 # 功能：验证成功进程的 stdout/stderr 被分别无损保存并产生成功状态

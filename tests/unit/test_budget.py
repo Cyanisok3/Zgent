@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cyan.core.compact.budget import truncate_tool_results
+from cyan.agent.compact.budget import truncate_tool_results
 
 
 def _make_tool_result_msg(content: str) -> dict:

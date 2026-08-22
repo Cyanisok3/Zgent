@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import LlmResponse, UsageStats
-from cyan.core.subagent.registry import BackgroundTaskRegistry
-from cyan.core.subagent.tool import AgentResultTool, SpawnAgentTool
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, UsageStats
+from cyan.agent.subagent.registry import BackgroundTaskRegistry
+from cyan.agent.subagent.tool import AgentResultTool, SpawnAgentTool
 
 
 def _make_provider(result_text: str = "child done") -> Any:
@@ -171,7 +171,7 @@ async def test_agent_result_unknown_run_id(tmp_path: Path) -> None:
 # 设计：订阅父 bus 收集所有事件，断言 subagent.started 出现，且 parent_run_id 和 description 正确
 @pytest.mark.asyncio
 async def test_foreground_publishes_started_event(tmp_path: Path) -> None:
-    from cyan.core.bus.events import SubagentStartedEvent
+    from cyan.service.protocol.events import SubagentStartedEvent
 
     tool, _, bus = _make_tool(tmp_path)
     events: list[Any] = []

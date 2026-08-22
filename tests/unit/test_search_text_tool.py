@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.tools.builtin.search_text import SearchTextTool
+from cyan.agent.tools.builtin.search_text import SearchTextTool
 
 
 # 功能：验证 search_text 返回稳定路径、完整文件哈希和匹配行号

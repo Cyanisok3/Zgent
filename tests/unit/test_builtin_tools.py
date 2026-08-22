@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.tools.builtin.bash import BashTool
-from cyan.core.tools.builtin.list_dir import ListDirTool
-from cyan.core.tools.builtin.write_file import WriteFileTool
+from cyan.agent.tools.builtin.bash import BashTool
+from cyan.agent.tools.builtin.list_dir import ListDirTool
+from cyan.agent.tools.builtin.write_file import WriteFileTool
 
 # ── bash ──────────────────────────────────────────────────────────────────────
 

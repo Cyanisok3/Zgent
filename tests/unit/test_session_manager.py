@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.bus.envelope import HandlerError
-from cyan.core.events.bus import EventBus
-from cyan.core.runner import RunOutcome
-from cyan.core.session.manager import SESSION_CLOSED, SESSION_NOT_FOUND, SessionManager
-from cyan.core.session.model import Session
-from cyan.core.session.store import SessionStore
+from cyan.agent.events.bus import EventBus
+from cyan.agent.runner import RunOutcome
+from cyan.agent.session.manager import SESSION_CLOSED, SESSION_NOT_FOUND, SessionManager
+from cyan.agent.session.model import Session
+from cyan.agent.session.store import SessionStore
+from cyan.errors import HandlerError
 
 
 class _Runner:

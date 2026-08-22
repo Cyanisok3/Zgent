@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from cyan.core.compact.compactor import Compactor
-from cyan.core.context import ExecutionContext
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import LlmResponse, UsageStats
+from cyan.agent.compact.compactor import Compactor
+from cyan.agent.context import ExecutionContext
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, UsageStats
 
 
 def _stub_provider(summary: str = "## 1. Original Goal\nTest\n## 2. Completed Steps\n- done") -> Any:

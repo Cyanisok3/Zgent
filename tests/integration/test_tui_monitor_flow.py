@@ -8,8 +8,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from cyan.core.jobs.launch import parse_training_command
-from cyan.core.transport.socket_client import SocketClient
+from cyan.service.transport.socket_client import SocketClient
+from cyan.training.jobs.launch import parse_training_command
 from cyan.tui.app import ChatTextArea, CyanTuiApp
 
 

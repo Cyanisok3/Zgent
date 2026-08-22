@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.session.model import Session
-from cyan.core.session.store import SessionStore
+from cyan.agent.session.model import Session
+from cyan.agent.session.store import SessionStore
 
 
 # 功能：验证 SessionStore 初始化时自动创建 sessions 根目录
@@ -63,7 +63,7 @@ def test_meta_replace_failure_preserves_previous_file(
     def fail_replace(source: object, destination: object) -> None:
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr("cyan.core.session.store.os.replace", fail_replace)
+    monkeypatch.setattr("cyan.agent.session.store.os.replace", fail_replace)
     with pytest.raises(OSError, match="simulated replace failure"):
         store.write_meta(updated)
 

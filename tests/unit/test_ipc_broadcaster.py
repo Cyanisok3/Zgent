@@ -6,14 +6,14 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
-from cyan.core.bus.events import (
+from cyan.service.protocol.events import (
     JobStartedEvent,
     LlmTokenEvent,
     RunFinishedEvent,
     RunStartedEvent,
     StepStartedEvent,
 )
-from cyan.core.transport.ipc_broadcaster import IpcEventBroadcaster
+from cyan.service.transport.ipc_broadcaster import IpcEventBroadcaster
 
 
 # 创建可控制 drain 行为的 StreamWriter mock

@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-from cyan.core.config import CyanConfig
-from cyan.core.runner import AgentRunner
+from cyan.agent.runner import AgentRunner
+from cyan.config import CyanConfig
 
 # Load project .env so ANTHROPIC_API_KEY is available without going through get_config()
 load_dotenv(Path(__file__).parent.parent.parent / ".env", override=False)

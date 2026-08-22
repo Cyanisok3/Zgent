@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.config import get_config
+from cyan.config import get_config
 
 
 # 写入测试专用的环境变量文件

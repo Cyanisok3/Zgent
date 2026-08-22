@@ -4,11 +4,11 @@ import asyncio
 
 from pydantic import BaseModel
 
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import ToolCallBlock
-from cyan.core.tools.base import BaseTool, ToolResult
-from cyan.core.tools.invocation import invoke_tool
-from cyan.core.tools.registry import ToolRegistry
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import ToolCallBlock
+from cyan.agent.tools.base import BaseTool, ToolResult
+from cyan.agent.tools.invocation import invoke_tool
+from cyan.agent.tools.registry import ToolRegistry
 
 # --- stub tools --------------------------------------------------------------
 

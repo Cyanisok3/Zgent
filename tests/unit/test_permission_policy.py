@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cyan.core.permissions.policy import (
+from cyan.agent.permissions.policy import (
     PermissionDecision,
     ToolPolicy,
     evaluate,

@@ -111,11 +111,9 @@ smoke 由用户声明，不由 Agent 生成或修改。smoke 失败时，cyan �
 cyan / cyan-tui / cyan VS Code
     │ TCP loopback + NDJSON + JSON-RPC 2.0
 cyan-core
-    ├── JobSupervisor ── real process groups
-    ├── file-backed JobStore
-    ├── IncidentCoordinator
-    ├── AgentRunner / ToolRegistry
-    └── EventBus / SessionManager
+    ├── service/       daemon, protocol, transport
+    ├── agent/         AgentRunner, EventBus, ToolRegistry, SessionManager
+    └── training/      JobSupervisor, JobStore, IncidentCoordinator
 ```
 
 原始进程输出只写 attempt 日志；TUI 按 byte cursor 读取。`launch.json` 为 `0600`，不会通过
@@ -125,7 +123,7 @@ RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部�
 
 ### Incident 状态机
 
-状态流转由 `src/cyan/core/incidents/fsm.py` 的声明式转移表作为单一事实源；该图由
+状态流转由 `src/cyan/training/incidents/fsm.py` 的声明式转移表作为单一事实源；该图由
 `fsm.render_mermaid()` 从同一张表生成，运行时校验、文档与测试永不漂移：
 
 ```mermaid

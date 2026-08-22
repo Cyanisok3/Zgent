@@ -7,14 +7,14 @@ from typing import cast
 
 import pytest
 
-from cyan.core.jobs.models import (
+from cyan.training.jobs.models import (
     AttemptRecord,
     FailureRecord,
     JobRecord,
     JobSpec,
     LogStream,
 )
-from cyan.core.jobs.store import MAX_LOG_READ_BYTES, JobStore
+from cyan.training.jobs.store import MAX_LOG_READ_BYTES, JobStore
 
 
 # 功能：验证 JobStore 将公开状态和私有启动信息写入约定目录

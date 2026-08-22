@@ -21,7 +21,7 @@ dependencies = [
 # 安装后可在 PATH 中执行的入口：`cyan` / `cyan-core` / `cyan-tui`
 [project.scripts]
 cyan = "cyan.cli.main:main"
-cyan-core = "cyan.core.app:run"
+cyan-core = "cyan.service.app:run"
 cyan-tui = "cyan.tui.__main__:main"
 
 # ---- Hatch：打 wheel 时从 src 布局收录包 ----

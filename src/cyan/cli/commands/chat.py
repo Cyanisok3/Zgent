@@ -4,8 +4,8 @@ import asyncio
 import sys
 from typing import Any
 
-from cyan.core.config import CyanConfig
-from cyan.core.transport.socket_client import IpcError, SocketClient
+from cyan.config import CyanConfig
+from cyan.service.transport.socket_client import IpcError, SocketClient
 
 _DECISION_MAP: dict[str, str] = {
     "y": "allow_once",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cyan.core.memory.loader import load_context_file
+from cyan.agent.memory.loader import load_context_file
 
 
 # 功能：验证文件存在时返回去除首尾空格的完整内容

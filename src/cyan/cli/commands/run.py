@@ -6,8 +6,8 @@ import sys
 import time
 from typing import Any
 
-from cyan.core.config import CyanConfig
-from cyan.core.transport.socket_client import IpcError, SocketClient
+from cyan.config import CyanConfig
+from cyan.service.transport.socket_client import IpcError, SocketClient
 
 
 class StdoutPrinter:

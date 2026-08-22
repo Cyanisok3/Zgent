@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cyan.core.app import CoreApp
-from cyan.core.bus.commands import JobStartResult
-from cyan.core.bus.envelope import HandlerError
+from cyan.errors import HandlerError
+from cyan.service.app import CoreApp
+from cyan.service.protocol.commands import JobStartResult
 
 
 # 功能：验证 launch.preview 只返回结构化预览和指纹，不回显继承环境

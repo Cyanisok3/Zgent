@@ -66,16 +66,14 @@ cyan is a dual-process local system:
 cyan / cyan-tui / cyan VS Code
     │ TCP loopback, NDJSON framing, JSON-RPC 2.0 commands
 cyan-core
-    ├── JobSupervisor
-    ├── file-backed JobStore
-    ├── IncidentCoordinator
-    ├── AgentRunner / EventBus / ToolRegistry
-    └── SessionManager
+    ├── service/       daemon, protocol, transport
+    ├── agent/         AgentRunner, EventBus, ToolRegistry, SessionManager
+    └── training/      JobSupervisor, JobStore, IncidentCoordinator
 ```
 
 The transport is TCP on `127.0.0.1:7437`, not a Unix socket.
 
-### Protocol (`src/cyan/core/bus/`)
+### Protocol (`src/cyan/service/protocol/`)
 
 Commands and events are Pydantic v2 models discriminated by `type`. When changing these models,
 update their unions and regenerate [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md):
@@ -85,7 +83,7 @@ uv run python scripts/gen_protocol_doc.py
 uv run python scripts/gen_protocol_doc.py --check
 ```
 
-### Job runtime (`src/cyan/core/jobs/`)
+### Job runtime (`src/cyan/training/jobs/`)
 
 `JobSupervisor` is the only owner of long-running process groups. It uses
 `asyncio.create_subprocess_exec`, separate stdout/stderr drains, and exact persisted argv/cwd/env
@@ -105,7 +103,7 @@ Daemon-owned training and smoke processes use `DEVNULL` stdin; watched jobs are 
 
 `launch.json` is private (`0600`) and must not be returned by RPC or exposed to the Agent.
 
-### Incident harness (`src/cyan/core/incidents/`)
+### Incident harness (`src/cyan/training/incidents/`)
 
 Incident profiles are rebuilt from persisted metadata on every run. They have a fixed workspace,
 12-step cap, disabled compaction, 256 KiB total log evidence budget, and only these tools:

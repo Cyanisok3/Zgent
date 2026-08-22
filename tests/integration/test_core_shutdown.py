@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 
-from cyan.core.transport.socket_client import SocketClient
+from cyan.service.transport.socket_client import SocketClient
 
 
 # 功能：验证停止 RPC 会命中真实监听的 daemon，并等待统一清理流程正常退出

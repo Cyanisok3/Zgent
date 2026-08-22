@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.task.manager import TaskManager
+from cyan.agent.task.manager import TaskManager
 
 
 # 功能：验证 create 写入 JSON 文件并返回正确的 Task 对象

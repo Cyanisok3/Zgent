@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.incidents.models import Incident
-from cyan.core.incidents.store import IncidentStore
+from cyan.training.incidents.models import Incident
+from cyan.training.incidents.store import IncidentStore
 
 
 # 功能：验证 Incident typed model 能通过文件 store 原子往返

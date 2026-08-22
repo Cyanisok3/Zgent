@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from cyan.core.bus.envelope import (
+from cyan.service.protocol.envelope import (
     PARSE_ERROR,
     JsonRpcRequest,
     JsonRpcSuccess,

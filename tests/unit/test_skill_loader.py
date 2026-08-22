@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.skills.loader import Skill, SkillLoader
+from cyan.agent.skills.loader import Skill, SkillLoader
 
 
 # 功能：内建 review skill 应能被 SkillLoader 查找到
@@ -53,7 +53,7 @@ def test_arguments_substituted() -> None:
 # 功能：frontmatter 中的 allowed_tools 列表应被正确解析
 # 设计：构造含 allowed_tools 的 Markdown 文件，通过 _parse_skill_file 解析并验证结果
 def test_frontmatter_parsed(tmp_path: Path) -> None:
-    from cyan.core.skills.loader import _parse_skill_file
+    from cyan.agent.skills.loader import _parse_skill_file
 
     content = """\
 ---
@@ -78,7 +78,7 @@ allowed_tools:
 # 功能：无 frontmatter 的 Markdown 文件仍可加载，allowed_tools 为空列表
 # 设计：写入纯正文 Markdown，断言解析成功且 allowed_tools=[]
 def test_no_frontmatter(tmp_path: Path) -> None:
-    from cyan.core.skills.loader import _parse_skill_file
+    from cyan.agent.skills.loader import _parse_skill_file
 
     content = "你是助手，请帮助用户完成任务：$ARGUMENTS\n"
     p = tmp_path / "plain.md"

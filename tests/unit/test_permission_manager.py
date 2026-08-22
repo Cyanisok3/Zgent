@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from cyan.core.permissions.manager import PermissionManager
-from cyan.core.permissions.policy import PermissionDecision, ToolPolicy
-from cyan.core.permissions.storage import load_policy_file
+from cyan.agent.permissions.manager import PermissionManager
+from cyan.agent.permissions.policy import PermissionDecision, ToolPolicy
+from cyan.agent.permissions.storage import load_policy_file
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

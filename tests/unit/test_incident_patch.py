@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.incidents.patch import (
+from cyan.training.incidents.patch import (
     PatchError,
     PatchService,
     apply_unified_diff_to_text,
     build_replacement_diff,
 )
-from cyan.core.incidents.store import IncidentStore
-from cyan.core.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
+from cyan.training.incidents.store import IncidentStore
+from cyan.training.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
 
 
 # 初始化仅供 git apply 使用的真实临时工作树

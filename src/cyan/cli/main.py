@@ -10,8 +10,8 @@ from cyan.cli.commands.run import cmd_run
 from cyan.cli.commands.trace import cmd_trace
 from cyan.cli.commands.version import cmd_version
 from cyan.cli.commands.watch import cmd_job_tui, cmd_watch
-from cyan.core.config import get_config
-from cyan.core.logging_setup import setup_logging
+from cyan.config import get_config
+from cyan.service.logging_setup import setup_logging
 
 
 # CLI 主入口：解析命令行参数并分发到对应子命令

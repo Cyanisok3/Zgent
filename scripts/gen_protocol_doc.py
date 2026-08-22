@@ -11,8 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cyan.core.bus import commands, events
-from cyan.core.bus.envelope import EventPushEnvelope
+from cyan.service.protocol import commands, events
+from cyan.service.protocol.envelope import EventPushEnvelope
 
 _OUTPUT_PATH = Path(__file__).parent.parent / "WIRE_PROTOCOL.md"
 

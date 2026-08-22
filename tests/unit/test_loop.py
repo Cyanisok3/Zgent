@@ -5,12 +5,12 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from cyan.core.context import ExecutionContext
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import LlmResponse, ToolCallBlock
-from cyan.core.loop import AgentLoop
-from cyan.core.tools.base import BaseTool, ToolResult
-from cyan.core.tools.registry import ToolRegistry
+from cyan.agent.context import ExecutionContext
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, ToolCallBlock
+from cyan.agent.loop import AgentLoop
+from cyan.agent.tools.base import BaseTool, ToolResult
+from cyan.agent.tools.registry import ToolRegistry
 
 # --- stubs -------------------------------------------------------------------
 

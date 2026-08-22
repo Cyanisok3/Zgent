@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.incidents.patch import PatchService, sha256_bytes
-from cyan.core.incidents.store import IncidentStore
-from cyan.core.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
+from cyan.training.incidents.patch import PatchService, sha256_bytes
+from cyan.training.incidents.store import IncidentStore
+from cyan.training.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
 
 
 # 为当前真实文件构造可校验的 workspace evidence

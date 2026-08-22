@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.provider import AnthropicProvider
-from cyan.core.llm.types import LlmResponse
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.provider import AnthropicProvider
+from cyan.agent.llm.types import LlmResponse
 
 # --- helpers -----------------------------------------------------------------
 

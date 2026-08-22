@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cyan.core.tools.base import BaseTool, ToolResult
-from cyan.core.tools.registry import ToolRegistry
+from cyan.agent.tools.base import BaseTool, ToolResult
+from cyan.agent.tools.registry import ToolRegistry
 
 
 class _FakeTool(BaseTool):

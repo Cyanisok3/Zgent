@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cyan.core.transport.socket_client import IpcError, SocketClient
+from cyan.service.transport.socket_client import IpcError, SocketClient
 
 
 async def _start_mock_server(

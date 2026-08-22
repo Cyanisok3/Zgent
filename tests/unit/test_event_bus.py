@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from cyan.core.events.bus import EventBus
+from cyan.agent.events.bus import EventBus
 
 
 class _FakeEvent(BaseModel):

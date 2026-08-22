@@ -7,7 +7,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from cyan.core.transport.socket_client import SocketClient
+from cyan.service.transport.socket_client import SocketClient
 
 
 # 功能：验证 VS Code 使用的 preview/start/log 协议贯穿真实 daemon 和子进程

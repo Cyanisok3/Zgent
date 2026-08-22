@@ -6,7 +6,7 @@ import logging.handlers
 import os
 from pathlib import Path
 
-from cyan.core.config import get_config
+from cyan.config import get_config
 from cyan.tui.app import CyanTuiApp
 
 _DEFAULT_TUI_LOG = "~/.cyan/logs/tui.log"

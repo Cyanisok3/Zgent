@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cyan.core.mcp.client import McpClient, McpServerUnavailableError, McpToolDef
-from cyan.core.mcp.tool import McpTool
+from cyan.agent.mcp.client import McpClient, McpServerUnavailableError, McpToolDef
+from cyan.agent.mcp.tool import McpTool
 
 
 def _make_tool(

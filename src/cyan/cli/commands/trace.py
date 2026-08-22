@@ -5,8 +5,8 @@ import sys
 import time
 from pathlib import Path
 
-from cyan.core.config import CyanConfig
-from cyan.core.trace.record import TraceRecord
+from cyan.agent.trace.record import TraceRecord
+from cyan.config import CyanConfig
 
 _COLORS = {
     "CLIENT→CORE": "\033[36m",

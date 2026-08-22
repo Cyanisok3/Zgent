@@ -9,20 +9,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from cyan.core.config import CyanConfig
-from cyan.core.events.bus import EventBus
-from cyan.core.incidents.coordinator import (
-    IncidentCoordinator,
-    _reference_was_observed,
-)
-from cyan.core.incidents.models import Incident
-from cyan.core.incidents.smoke import SmokeExecution
-from cyan.core.incidents.store import IncidentStore
-from cyan.core.jobs import JobSpec, JobStore, JobSupervisor
-from cyan.core.llm.types import LlmResponse, ToolCallBlock
-from cyan.core.processes import read_process_identity
-from cyan.core.runner import AgentRunner
-from cyan.core.session import SessionManager, SessionStore
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, ToolCallBlock
+from cyan.agent.runner import AgentRunner
+from cyan.agent.session import SessionManager, SessionStore
+from cyan.config import CyanConfig
+from cyan.training.incidents.coordinator import IncidentCoordinator
+from cyan.training.incidents.evidence import _reference_was_observed
+from cyan.training.incidents.models import Incident
+from cyan.training.incidents.smoke import SmokeExecution
+from cyan.training.incidents.store import IncidentStore
+from cyan.training.jobs import JobSpec, JobStore, JobSupervisor
+from cyan.training.processes import read_process_identity
 
 
 # 功能：验证已观察的工作区和日志范围允许引用其中的稳定子范围

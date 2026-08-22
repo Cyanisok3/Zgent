@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cyan.core.events.bus import EventBus
-from cyan.core.llm.types import LlmResponse, UsageStats
-from cyan.core.trace.provider import TracingProvider
-from cyan.core.trace.record import TraceRecord
-from cyan.core.trace.writer import TraceWriter
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, UsageStats
+from cyan.agent.trace.provider import TracingProvider
+from cyan.agent.trace.record import TraceRecord
+from cyan.agent.trace.writer import TraceWriter
 
 
 def _make_response(stop_reason: str = "end_turn") -> LlmResponse:

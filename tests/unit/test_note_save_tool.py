@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cyan.core.session.store import SessionStore
-from cyan.core.tools.builtin.note_save import NoteSaveTool
+from cyan.agent.session.store import SessionStore
+from cyan.agent.tools.builtin.note_save import NoteSaveTool
 
 
 # 功能：验证 note_save 正常调用会把 content 写入 notes.md

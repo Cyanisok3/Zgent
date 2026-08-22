@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from cyan.cli.commands.core import _ping_check, cmd_core_start
-from cyan.core.config import CyanConfig
-from cyan.core.transport.socket_client import SocketClient
+from cyan.config import CyanConfig
+from cyan.service.transport.socket_client import SocketClient
 from cyan.tui.app import CyanTuiApp
 
 _CORE_START_TIMEOUT_SECONDS = 5.0

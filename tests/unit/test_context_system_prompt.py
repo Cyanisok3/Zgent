@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cyan.core.context import ExecutionContext
+from cyan.agent.context import ExecutionContext
 
 
 def _make_ctx(**kwargs) -> ExecutionContext:

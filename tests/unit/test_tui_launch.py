@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.core.jobs.launch import (
+from cyan.training.jobs.launch import (
     LaunchParseError,
     format_launch_preview,
     launch_fingerprint,

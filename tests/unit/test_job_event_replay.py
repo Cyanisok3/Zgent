@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import BaseModel
 
-from cyan.core.app import CoreApp
-from cyan.core.bus.envelope import HandlerError
-from cyan.core.bus.events import JobFinishedEvent, JobStartedEvent
-from cyan.core.jobs import AttemptRecord, JobRecord, JobSpec, JobStore, JobSupervisor
+from cyan.errors import HandlerError
+from cyan.service.app import CoreApp
+from cyan.service.protocol.events import JobFinishedEvent, JobStartedEvent
+from cyan.training.jobs import AttemptRecord, JobRecord, JobSpec, JobStore, JobSupervisor
 
 
 # 功能：验证磁盘终态回放使用 canonical job.finished 并服从 after_seq

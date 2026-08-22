@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from cyan.core.bus.commands import (
+from cyan.service.protocol.commands import (
     CoreShutdownCommand,
     CoreShutdownResult,
     PingCommand,
     PongResult,
 )
-from cyan.core.bus.events import CoreStartedEvent
+from cyan.service.protocol.events import CoreStartedEvent
 
 
 # 功能：验证 PingCommand 序列化后再反序列化，client 和 type 字段完整保留
