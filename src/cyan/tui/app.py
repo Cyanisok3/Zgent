@@ -20,7 +20,7 @@ from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from cyan.agent.skills.loader import SkillLoader
+from cyan.service.protocol.commands import WIRE_PROTOCOL_VERSION
 from cyan.service.transport.socket_client import IpcError, SocketClient
 from cyan.training.jobs.launch import (
     LaunchParseError,
@@ -219,7 +219,7 @@ def _job_matches_workspace(entry: dict[str, Any], workspace_root: Path) -> bool:
 
 
 class SlashCompleteWidget(Static):
-    """显示本地命令和普通 Agent skill 的斜杠补全。"""
+    """显示 Incident TUI 的本地斜杠命令补全。"""
 
     can_focus = False
 
@@ -334,139 +334,6 @@ class ToolCallBlock(Static):
         self.update(text)
 
 
-class PermissionBlock(Static):
-    """展示工具权限请求及其最终决策。"""
-
-    _LABELS = {
-        "allow_once": "allowed once",
-        "always_allow": "always allowed",
-        "deny_once": "denied",
-        "always_deny": "always denied",
-        "auto_allow": "auto allowed",
-        "auto_deny": "auto denied",
-    }
-
-    # 初始化待决权限请求
-    def __init__(self, tool_name: str, param_preview: str) -> None:
-        self._tool_name = tool_name
-        self._param_preview = param_preview
-        suffix = f"  [dim]{escape(param_preview)}[/dim]" if param_preview else ""
-        super().__init__(
-            f"[bold yellow]? permission[/bold yellow]  "
-            f"[bold]{escape(tool_name)}[/bold]{suffix}"
-        )
-
-    # 将待决状态更新为允许或拒绝摘要
-    def resolve(self, decision: str) -> None:
-        allowed = decision in {"allow_once", "always_allow", "auto_allow"}
-        icon = "[bold green]✓[/bold green]" if allowed else "[bold red]✗[/bold red]"
-        label = self._LABELS.get(decision, decision)
-        suffix = (
-            f"  [dim]{escape(self._param_preview)}[/dim]"
-            if self._param_preview
-            else ""
-        )
-        self.update(
-            f"{icon} permission  [bold]{escape(self._tool_name)}[/bold]"
-            f"{suffix}  [dim]{escape(label)}[/dim]"
-        )
-
-
-class PermissionSelect(Static):
-    """通过焦点和键盘选择一次性或持久权限决策。"""
-
-    can_focus = True
-
-    DEFAULT_CSS = """
-    PermissionSelect {
-        height: auto;
-        padding: 0 1;
-        margin: 0 1;
-        border: round $warning;
-    }
-    """
-
-    _CHOICES = (
-        ("allow_once", "Allow once", "y / 1"),
-        ("always_allow", "Always allow", "a / 2"),
-        ("deny_once", "Deny", "n / 3"),
-        ("always_deny", "Always deny", "d / 4"),
-    )
-    _KEYS = {
-        "y": "allow_once",
-        "1": "allow_once",
-        "a": "always_allow",
-        "2": "always_allow",
-        "n": "deny_once",
-        "3": "deny_once",
-        "d": "always_deny",
-        "4": "always_deny",
-    }
-
-    # 发布工具标识和用户决策
-    class Decided(Message):
-        # 保存来源控件、工具标识和决策
-        def __init__(
-            self,
-            widget: PermissionSelect,
-            tool_use_id: str,
-            decision: str,
-        ) -> None:
-            self.widget = widget
-            self.tool_use_id = tool_use_id
-            self.decision = decision
-            super().__init__()
-
-    # 初始化工具标识和选择光标
-    def __init__(self, tool_use_id: str) -> None:
-        super().__init__("")
-        self._tool_use_id = tool_use_id
-        self._cursor = 0
-
-    # 挂载后绘制并获取键盘焦点
-    def on_mount(self) -> None:
-        self.update(self._render_choices())
-        self.focus()
-
-    # 处理方向键、Enter 和直接决策快捷键
-    def on_key(self, event: events.Key) -> None:
-        if event.key in {"up", "k"}:
-            event.stop()
-            self._cursor = (self._cursor - 1) % len(self._CHOICES)
-            self.update(self._render_choices())
-            return
-        if event.key in {"down", "j"}:
-            event.stop()
-            self._cursor = (self._cursor + 1) % len(self._CHOICES)
-            self.update(self._render_choices())
-            return
-        if event.key == "enter":
-            event.stop()
-            self._pick(self._CHOICES[self._cursor][0])
-            return
-        decision = self._KEYS.get(event.key)
-        if decision is not None:
-            event.stop()
-            self._pick(decision)
-
-    # 渲染当前权限选项和光标
-    def _render_choices(self) -> str:
-        lines = []
-        for index, (_decision, label, hint) in enumerate(self._CHOICES):
-            marker = "❯" if index == self._cursor else " "
-            style = "bold cyan" if index == self._cursor else ""
-            if style:
-                lines.append(f"  [{style}]{marker} {label}[/{style}]  [dim]{hint}[/dim]")
-            else:
-                lines.append(f"  {marker} {label}  [dim]{hint}[/dim]")
-        lines.append("[dim]  ↑↓ navigate   enter confirm[/dim]")
-        return "\n".join(lines)
-
-    # 发布当前权限决策
-    def _pick(self, decision: str) -> None:
-        self.post_message(self.Decided(self, self._tool_use_id, decision))
-
-
 class ContextActionSelect(OptionList):
     """只在当前 Job 或 Incident 状态有效时展示的上下文动作选择器。"""
 
@@ -498,7 +365,7 @@ class ContextActionSelect(OptionList):
         if self._auto_focus:
             self.focus()
 
-    # Esc 只返回聊天输入，不隐式作出任何决定
+    # Esc 只返回命令输入，不隐式作出任何决定
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape":
             event.stop()
@@ -577,7 +444,7 @@ class ChatTextArea(TextArea):
 
 
 class CyanTuiApp(App[None]):
-    """普通对话、真实训练进程和 Incident 调查共用的项目级 TUI。"""
+    """训练监督和 Incident 调查共用的项目级 TUI。"""
 
     TITLE = "cyan"
     BINDINGS = [
@@ -621,7 +488,7 @@ class CyanTuiApp(App[None]):
     }
     """
 
-    # 初始化连接、项目工作区、聊天会话、附着目标和增量日志游标
+    # 初始化协议连接、项目工作区、附着目标和增量日志游标
     def __init__(
         self,
         host: str,
@@ -645,23 +512,16 @@ class CyanTuiApp(App[None]):
         self._snapshot: dict[str, Any] = {}
         self._incident_id: str | None = None
         self._proposal_id: str | None = None
-        self._incident_session_id: str | None = None
-        self._chat_session_id: str | None = None
-        self._chat_run_id: str | None = None
-        self._chat_busy = False
-        self._input_mode = "chat"
+        self._input_mode = "idle"
         self._pending_launch: ParsedLaunch | None = None
         self._slash_items: list[tuple[str, str]] = []
         self._pending_tool_blocks: dict[str, ToolCallBlock] = {}
-        self._pending_permission_blocks: dict[str, PermissionBlock] = {}
-        self._permission_selects: dict[str, PermissionSelect] = {}
         self._smoke_config: dict[str, Any] | None = None
         self._smoke_config_fingerprint: str | None = None
         self._can_apply = True
         self._awaiting_approval = False
         self._cancel_in_flight = False
         self._subscribed_run_ids: set[str] = set()
-        self._visible_subagent_run_ids: set[str] = set()
         self._run_subscription_lock = asyncio.Lock()
         self._shown_diagnosis_id: str | None = None
         self._shown_proposal_id: str | None = None
@@ -693,11 +553,11 @@ class CyanTuiApp(App[None]):
         self.query_one("#prompt", ChatTextArea).focus()
         self.run_worker(self._connection_loop(), exclusive=True, name="job-connection")
 
-    # Ctrl+Q 只退出 TUI，不向 daemon 发送取消或关闭会话命令
+    # Ctrl+Q 只退出 TUI，不向 daemon 发送取消或关闭命令
     async def action_quit(self) -> None:
         self.exit()
 
-    # 连接 daemon、创建聊天会话、恢复任务并持续增量读取状态与日志
+    # 连接 daemon、校验协议、恢复任务并持续增量读取状态与日志
     async def _connection_loop(self) -> None:
         reconnecting = False
         while True:
@@ -707,12 +567,17 @@ class CyanTuiApp(App[None]):
                 await client.connect()
                 self._client = client
                 self._subscribed_run_ids.clear()
-                self._visible_subagent_run_ids.clear()
                 client.on_event(self._handle_event)
                 event_task = asyncio.create_task(client.run_event_loop())
+                await client.send_command(
+                    "core.ping",
+                    {
+                        "client": "cyan/0.0.1",
+                        "protocol_version": WIRE_PROTOCOL_VERSION,
+                    },
+                )
                 if reconnecting:
                     self._append_text("Reconnected to daemon.", style="bold cyan")
-                await self._prepare_chat()
                 if self._job_id is None and not self._skip_job_restore:
                     await self._choose_job()
                 if self._job_id is not None:
@@ -741,42 +606,9 @@ class CyanTuiApp(App[None]):
                 self._client = None
             await asyncio.sleep(0.5)
 
-    # 创建本次 TUI 的普通 chat session，并在重连时复用当前会话
-    async def _prepare_chat(self) -> None:
-        if self._client is None:
-            return
-        await self._client.send_command(
-            "event.subscribe",
-            {
-                "topics": ["session.*", "subagent.*"],
-                "scope": "global",
-            },
-        )
-        if self._chat_session_id is None:
-            result = await self._client.send_command(
-                "session.create",
-                {
-                    "mode": "chat",
-                    "title": self._workspace_root.name,
-                    "workspace_root": str(self._workspace_root),
-                },
-            )
-            self._chat_session_id = str(result["session_id"])
-            self._append_text(
-                f"Chat ready in {self._workspace_root}",
-                style="bold cyan",
-            )
-        if self._chat_run_id is not None:
-            await self._subscribe_run(self._chat_run_id)
-
-    # 合并本地 TUI 命令与普通 Agent skills，保持本地命令优先
+    # 返回仅属于训练 Incident 产品面的本地命令
     def _build_slash_items(self) -> list[tuple[str, str]]:
-        items = dict(_LOCAL_SLASH_COMMANDS)
-        for skill in SkillLoader().list_all_skills():
-            if skill.name not in items:
-                description = skill.description.splitlines()[0] if skill.description else ""
-                items[skill.name] = description[:60]
-        return list(items.items())
+        return list(_LOCAL_SLASH_COMMANDS)
 
     # 使用当前持久化序号订阅 Job 流，重连时仅回放未见事件
     async def _subscribe_job_events(self) -> None:
@@ -800,7 +632,6 @@ class CyanTuiApp(App[None]):
             self._snapshot = {}
             self._incident_id = None
             self._proposal_id = None
-            self._incident_session_id = None
             self._shown_diagnosis_id = None
             self._shown_proposal_id = None
             self._shown_smoke = None
@@ -891,7 +722,7 @@ class CyanTuiApp(App[None]):
                 exclusive=False,
             )
 
-    # Esc 取消 Job 选择或把上下文操作焦点交还聊天输入框
+    # Esc 取消 Job 选择或把上下文操作焦点交还命令输入框
     def on_context_action_select_cancelled(
         self,
         event: ContextActionSelect.Cancelled,
@@ -983,10 +814,6 @@ class CyanTuiApp(App[None]):
                         "step.*",
                         "tool.*",
                         "llm.*",
-                        "permission.*",
-                        "context.*",
-                        "skill.*",
-                        "log.*",
                     ],
                     "scope": f"run:{run_id}",
                     "replay_from_run": run_id,
@@ -995,11 +822,11 @@ class CyanTuiApp(App[None]):
             if client is self._client:
                 self._subscribed_run_ids.add(run_id)
 
-    # 在没有附着任务时展示项目级聊天和监视入口
+    # 在没有附着任务时展示项目级命令和监视入口
     def _render_idle_header(self) -> None:
         header = Text()
         header.append("cyan", style="bold cyan")
-        header.append("  chat · idle\n", style="dim")
+        header.append("  incident-only · idle\n", style="dim")
         header.append(str(self._workspace_root), style="dim")
         self.query_one("#job-header", Label).update(header)
 
@@ -1112,7 +939,6 @@ class CyanTuiApp(App[None]):
         self._proposal_id = str(
             proposal.get("id") or incident.get("active_proposal_id") or ""
         ) or None
-        self._incident_session_id = str(incident.get("session_id") or "") or None
         self._smoke_config = smoke_config or None
         self._smoke_config_fingerprint = (
             str(self._snapshot.get("smoke_config_fingerprint") or "") or None
@@ -1277,7 +1103,7 @@ class CyanTuiApp(App[None]):
             return
         self._append_text("Cancellation requested", style="yellow")
 
-    # 统一接收多行输入，并按当前本地模式路由到命令解析或普通聊天
+    # 统一接收多行输入，并按当前本地模式路由到命令解析或 Incident 追问
     def on_chat_text_area_submitted(self, event: ChatTextArea.Submitted) -> None:
         content = event.value.strip()
         if not content:
@@ -1289,11 +1115,11 @@ class CyanTuiApp(App[None]):
             exclusive=False,
         )
 
-    # 训练命令输入模式只做本地解析，其他输入先匹配本地斜杠命令
+    # 训练命令输入模式只做本地解析，普通文本不创建 Agent run
     async def _handle_submission(self, content: str) -> None:
         if self._input_mode == "monitor":
             if content == "/cancel":
-                self._input_mode = "chat"
+                self._input_mode = "idle"
                 self._pending_launch = None
                 self._append_text("Training command entry cancelled.", style="dim")
                 self._update_prompt()
@@ -1302,9 +1128,12 @@ class CyanTuiApp(App[None]):
             return
         handled = await self._handle_local_command(content)
         if not handled:
-            await self._send_chat(content)
+            self._append_text(
+                "普通文本不会发送给 Agent；请先使用 /monitor，或显式使用 /incident <text>。",
+                style="yellow",
+            )
 
-    # 处理仅属于 TUI harness 的命令，未知斜杠输入继续交给普通 Agent skill
+    # 处理仅属于 TUI harness 的本地命令
     async def _handle_local_command(self, content: str) -> bool:
         command, _, argument = content.partition(" ")
         if command == "/help":
@@ -1373,7 +1202,7 @@ class CyanTuiApp(App[None]):
             self._append_text(f"Invalid training command: {error}", style="bold red")
             return
         self._pending_launch = launch
-        self._input_mode = "chat"
+        self._input_mode = "idle"
         self._append_text(
             format_launch_preview(launch, self._workspace_root),
             style="bold",
@@ -1413,93 +1242,30 @@ class CyanTuiApp(App[None]):
         await self._subscribe_job_events()
         self._append_text(f"Training started: {job_id}", style="bold cyan")
 
-    # 发送普通聊天消息并订阅本次 Agent run
-    async def _send_chat(self, content: str) -> None:
-        if self._client is None or self._chat_session_id is None:
-            self._append_text("Chat is not connected.", style="bold red")
-            return
-        if self._chat_busy:
-            self._append_text("Agent is still working.", style="yellow")
-            return
-        self._append_text(f"> {content}", style="bold")
-        self._chat_busy = True
-        self._update_prompt()
-        try:
-            result = await self._client.send_command(
-                "session.send_message",
-                {"session_id": self._chat_session_id, "content": content},
-            )
-        except (IpcError, RuntimeError, OSError) as error:
-            self._chat_busy = False
-            self._update_prompt()
-            self._append_text(f"Chat failed: {error}", style="bold red")
-            return
-        run_id = str(result.get("run_id", ""))
-        self._chat_run_id = run_id or None
-        await self._subscribe_run(run_id)
-        if not self._chat_busy:
-            self._chat_run_id = None
-
-    # 复用 daemon 拥有的只读 Incident session 发送显式追问
+    # 通过 v2 incident.follow_up 发送显式 Incident 追问
     async def _send_followup(self, content: str) -> None:
-        if self._client is None or self._incident_session_id is None:
+        if self._client is None or self._incident_id is None:
             self._append_text("No incident is available for follow-up.", style="yellow")
             return
         self._append_text(f"incident> {content}", style="bold")
         result = await self._client.send_command(
-            "session.send_message",
-            {"session_id": self._incident_session_id, "content": content},
+            "incident.follow_up",
+            {"incident_id": self._incident_id, "content": content},
         )
         run_id = str(result.get("run_id", ""))
         await self._subscribe_run(run_id)
 
-    # 将焦点审批结果通过现有 permission.respond IPC 返回 core
-    async def on_permission_select_decided(
-        self,
-        message: PermissionSelect.Decided,
-    ) -> None:
-        if self._client is None:
-            self._append_text("Permission response failed: daemon disconnected.", style="red")
-            return
-        try:
-            await self._client.send_command(
-                "permission.respond",
-                {
-                    "tool_use_id": message.tool_use_id,
-                    "decision": message.decision,
-                },
-            )
-        except (IpcError, RuntimeError, OSError) as error:
-            self._append_text(f"Permission response failed: {error}", style="red")
-            return
-        self._resolve_permission(message.tool_use_id, message.decision)
-
-    # 收起指定权限控件并恢复统一输入框状态
-    def _resolve_permission(self, tool_use_id: str, decision: str) -> None:
-        select = self._permission_selects.pop(tool_use_id, None)
-        if select is not None:
-            select.remove()
-        block = self._pending_permission_blocks.pop(tool_use_id, None)
-        if block is not None:
-            block.resolve(decision)
-        if (select is not None or block is not None) and not self._permission_selects:
-            self._update_prompt()
-            self.query_one("#prompt", ChatTextArea).focus()
-
-    # 根据聊天或训练命令输入状态刷新统一输入框提示
+    # 根据训练命令或本地命令状态刷新输入框提示
     def _update_prompt(self) -> None:
         prompt = self.query_one("#prompt", ChatTextArea)
         if self._input_mode == "monitor":
             prompt.border_title = "Training command"
             prompt.read_only = False
-        elif self._chat_busy:
-            prompt.border_title = "Agent is working"
-            prompt.read_only = True
         else:
-            prompt.border_title = "Message or /command"
+            prompt.border_title = "Command or /command"
             prompt.read_only = False
 
-    # 将聊天与 Incident 的流式文本、工具和权限事件追加到统一时间线
+    # 将 Incident Agent 的摘要事件追加到统一时间线
     async def _handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type", ""))
         if event_type.startswith("job."):
@@ -1511,50 +1277,6 @@ class CyanTuiApp(App[None]):
             ):
                 return
             self._job_event_seq = seq
-            return
-        if event_type.startswith("session."):
-            session_id = str(event.get("session_id") or "")
-            if session_id not in {self._chat_session_id, self._incident_session_id}:
-                return
-            if (
-                event_type == "session.waiting_for_input"
-                and session_id == self._chat_session_id
-            ):
-                self._chat_busy = False
-                self._chat_run_id = None
-                self._update_prompt()
-            elif event_type == "session.closed" and session_id == self._chat_session_id:
-                self._chat_busy = False
-                self._chat_run_id = None
-                self._append_text("Chat session closed.", style="dim")
-                prompt = self.query_one("#prompt", ChatTextArea)
-                prompt.read_only = True
-                prompt.border_title = "Chat session closed"
-            return
-        if event_type == "subagent.started":
-            parent_run_id = str(event.get("parent_run_id") or "")
-            if parent_run_id not in self._subscribed_run_ids:
-                return
-            run_id = str(event.get("run_id") or "")
-            self._visible_subagent_run_ids.add(run_id)
-            self._append_text(
-                f"subagent: {event.get('description', '')}  {run_id}",
-                style="dim cyan",
-            )
-            return
-        if event_type == "subagent.finished":
-            run_id = str(event.get("run_id") or "")
-            parent_run_id = str(event.get("parent_run_id") or "")
-            if (
-                run_id not in self._visible_subagent_run_ids
-                and parent_run_id not in self._subscribed_run_ids
-            ):
-                return
-            self._visible_subagent_run_ids.discard(run_id)
-            self._append_text(
-                f"subagent: {run_id}  {event.get('status', '')}",
-                style="dim",
-            )
             return
         if event_type == "run.started":
             run_id = str(event.get("run_id") or "")
@@ -1610,10 +1332,6 @@ class CyanTuiApp(App[None]):
             self._seen_agent_events.add(event_key)
             self._agent_blocks.pop(run_id, None)
             self._agent_texts.pop(run_id, None)
-            if run_id == self._chat_run_id:
-                self._chat_busy = False
-                self._chat_run_id = None
-                self._update_prompt()
             self._append_text(
                 f"Agent run: {event.get('status', '')}  "
                 f"steps={event.get('steps', 0)}",
@@ -1622,29 +1340,6 @@ class CyanTuiApp(App[None]):
                     if event.get("status") == "success"
                     else "dim red"
                 ),
-            )
-            return
-        if event_type == "permission.requested":
-            tool_use_id = str(event.get("tool_use_id") or "")
-            if not tool_use_id or tool_use_id in self._pending_permission_blocks:
-                return
-            tool_name = str(event.get("tool_name") or "")
-            preview = str(event.get("param_preview") or "")
-            permission_block = PermissionBlock(tool_name, preview)
-            select = PermissionSelect(tool_use_id)
-            self._pending_permission_blocks[tool_use_id] = permission_block
-            self._permission_selects[tool_use_id] = select
-            self._append(permission_block)
-            prompt = self.query_one("#prompt", ChatTextArea)
-            prompt.read_only = True
-            prompt.border_title = f"Permission required: {tool_name}"
-            self.mount(select, before="#prompt")
-            return
-        if event_type in {"permission.granted", "permission.denied"}:
-            tool_use_id = str(event.get("tool_use_id") or "")
-            self._resolve_permission(
-                tool_use_id,
-                str(event.get("decision") or event_type.rsplit(".", 1)[1]),
             )
             return
         if event_type == "llm.token":
@@ -1678,26 +1373,6 @@ class CyanTuiApp(App[None]):
         if event_type == "step.started":
             self._append_text(f"step {event.get('step', '')}", style="dim")
             return
-        if event_type == "context.compacted":
-            self._append_text(
-                f"Context compacted: {event.get('original_tokens', 0)} → "
-                f"{event.get('summary_tokens', 0)} tokens",
-                style="dim cyan",
-            )
-            return
-        if event_type == "skill.invoked":
-            self._append_text(
-                f"/{event.get('skill_name', '')}  {event.get('arguments', '')}",
-                style="dim cyan",
-            )
-            return
-        if event_type == "log.line":
-            self._append_text(
-                f"{event.get('level', 'INFO')} "
-                f"{event.get('source', '')}: {event.get('message', '')}",
-                style="dim",
-            )
-
     # 将带样式的纯文本块追加到时间线
     def _append_text(self, content: str, *, style: str = "") -> None:
         self._append(Static(Text(content, style=style)))

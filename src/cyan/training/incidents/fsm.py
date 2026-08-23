@@ -1,7 +1,7 @@
 """Incident 状态机的纯声明式定义。
 
 本模块是 Incident 状态流转的单一事实源：只依赖标准库与 models.py 的
-``IncidentStatus``，不 import store/bus/session，不产生任何 I/O。运行时校验、
+``IncidentStatus``，不 import store/bus/runtime，不产生任何 I/O。运行时校验、
 mermaid 文档与单元测试都从同一张 ``TRANSITIONS`` 表派生，保证三者永不漂移。
 """
 

@@ -5,26 +5,13 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Discriminator
 
 from cyan.agent.events.models import (
-    ContextCompactedEvent,
     LlmModelSelectedEvent,
     LlmTokenEvent,
     LlmUsageEvent,
-    LogLineEvent,
-    PermissionDeniedEvent,
-    PermissionGrantedEvent,
-    PermissionRequestedEvent,
     RunFinishedEvent,
     RunStartedEvent,
-    SessionClosedEvent,
-    SessionCreatedEvent,
-    SessionMessageReceivedEvent,
-    SessionResumedEvent,
-    SessionWaitingForInputEvent,
-    SkillInvokedEvent,
     StepFinishedEvent,
     StepStartedEvent,
-    SubagentFinishedEvent,
-    SubagentStartedEvent,
     ToolCallFailedEvent,
     ToolCallFinishedEvent,
     ToolCallStartedEvent,
@@ -38,6 +25,26 @@ from cyan.training.events import (
     SmokeFinishedEvent,
 )
 
+EVENT_TYPES = (
+    "core.started",
+    "run.started",
+    "run.finished",
+    "step.started",
+    "step.finished",
+    "tool.call_started",
+    "tool.call_finished",
+    "tool.call_failed",
+    "llm.token",
+    "llm.usage",
+    "llm.model_selected",
+    "job.started",
+    "job.finished",
+    "incident.opened",
+    "incident.status_changed",
+    "patch.proposed",
+    "smoke.finished",
+)
+
 
 class CoreStartedEvent(BaseModel):
     type: Literal["core.started"] = "core.started"
@@ -45,7 +52,7 @@ class CoreStartedEvent(BaseModel):
     version: str
 
 
-# 根据 type 字段决定事件类型的判别联合
+# 组合 Agent、训练和服务层的完整 v2 事件联合类型
 Event = Annotated[
     CoreStartedEvent
     | RunStartedEvent
@@ -58,19 +65,6 @@ Event = Annotated[
     | LlmTokenEvent
     | LlmUsageEvent
     | LlmModelSelectedEvent
-    | LogLineEvent
-    | SessionCreatedEvent
-    | SessionMessageReceivedEvent
-    | SessionWaitingForInputEvent
-    | SessionResumedEvent
-    | SessionClosedEvent
-    | ContextCompactedEvent
-    | PermissionRequestedEvent
-    | PermissionGrantedEvent
-    | PermissionDeniedEvent
-    | SubagentStartedEvent
-    | SubagentFinishedEvent
-    | SkillInvokedEvent
     | JobStartedEvent
     | JobFinishedEvent
     | IncidentOpenedEvent

@@ -41,11 +41,7 @@ class EventWriter:
                 return
             if self._summary_only:
                 event_type = data.get("type")
-                mapping_field = (
-                    "params"
-                    if event_type in ("tool.call_started", "permission.requested")
-                    else None
-                )
+                mapping_field = "params" if event_type == "tool.call_started" else None
                 if mapping_field is not None:
                     value = data.pop(mapping_field, {})
                     encoded = json.dumps(value, ensure_ascii=False, default=str)
@@ -57,12 +53,6 @@ class EventWriter:
                     "run.started": "goal",
                     "tool.call_finished": "output",
                     "tool.call_failed": "error_message",
-                    "log.line": "message",
-                    "permission.requested": "param_preview",
-                    "session.message_received": "content",
-                    "skill.invoked": "arguments",
-                    "subagent.started": "description",
-                    "patch.proposed": "summary",
                 }.get(str(event_type))
                 if text_field is not None:
                     value = str(data.pop(text_field, ""))

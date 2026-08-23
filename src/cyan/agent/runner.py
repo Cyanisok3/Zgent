@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cyan.agent.compact.compactor import Compactor
 from cyan.agent.context import ExecutionContext
 from cyan.agent.events.bus import EventBus, EventHandler
 from cyan.agent.events.models import RunFinishedEvent, RunStartedEvent
@@ -15,33 +14,14 @@ from cyan.agent.events.writer import EventWriter
 from cyan.agent.llm.base import LLMProvider
 from cyan.agent.llm.provider import AnthropicProvider
 from cyan.agent.loop import AgentLoop
-from cyan.agent.mcp.server import McpServerManager
-from cyan.agent.memory.loader import load_context_file
-from cyan.agent.permissions.manager import PermissionManager
-from cyan.agent.runs import RUNS_DIR, new_run_id
-from cyan.agent.session.model import Session
-from cyan.agent.session.store import SessionStore
-from cyan.agent.subagent.registry import BackgroundTaskRegistry
-from cyan.agent.subagent.tool import AgentResultTool, SpawnAgentTool
-from cyan.agent.task.manager import TaskManager
 from cyan.agent.tools.base import BaseTool
-from cyan.agent.tools.builtin import (
-    BashTool,
-    ListDirTool,
-    NoteSaveTool,
-    ReadFileTool,
-    TaskCreateTool,
-    TaskGetTool,
-    TaskListTool,
-    TaskUpdateTool,
-    WriteFileTool,
-)
 from cyan.agent.tools.registry import ToolRegistry
 from cyan.agent.trace.provider import TracingProvider
 from cyan.agent.trace.writer import TraceWriter
 from cyan.config import CyanConfig
 
 
+# 返回当前 UTC 时间字符串
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -51,267 +31,79 @@ class RunOutcome:
     status: str
     result: str
     reason: str | None
+    initial_input_bytes: int = 0
+    peak_input_bytes: int = 0
+    budget_exhausted: bool = False
 
 
 @dataclass
 class RunProfile:
     workspace_root: Path
-    system_prompt_override: str | None = None
-    tool_whitelist: list[str] | None = None
-    extra_tools: list[BaseTool] | None = None
-    max_steps: int | None = None
-    compact_threshold: float | None = None
-    summary_only_events: bool = False
-    include_context: bool = True
-    evidence_refs: set[str] | None = None
-
-
-type RunProfileFactory = Callable[[Session], RunProfile | None]
+    system_prompt: str
+    tools: list[BaseTool]
+    max_steps: int
+    max_input_bytes: int
+    summary_only_events: bool = True
 
 
 class AgentRunner:
-    # 组装所有运行时依赖，准备执行一次完整的 agent run
+    # 只按显式 Incident profile 组装一次运行，不加载任何通用 Agent 扩展
     def __init__(
         self,
         config: CyanConfig,
         *,
         bus: EventBus | None = None,
         provider: LLMProvider | None = None,
-        extra_handlers: list[EventHandler] | None = None,
-        runs_dir: Path | None = None,
+        extra_handlers: Iterable[EventHandler] = (),
         trace: TraceWriter | None = None,
-        permission_manager: PermissionManager | None = None,
-        mcp_manager: McpServerManager | None = None,
-        profile_factory: RunProfileFactory | None = None,
     ) -> None:
         self._config = config
         self._bus = bus
         self._provider = provider
-        self._extra_handlers: list[EventHandler] = extra_handlers or []
-        self._runs_dir = runs_dir or RUNS_DIR
+        self._extra_handlers = list(extra_handlers)
         self._trace = trace
-        self._permission_manager = permission_manager
-        self._mcp_manager = mcp_manager
-        self._profile_factory = profile_factory
-        # 跨 run 共享的后台 subagent 任务注册表
-        self._task_registry = BackgroundTaskRegistry()
 
-    # 构建工具注册表，注入 TaskManager（任务工具共享同一实例）；可选注入 SpawnAgentTool
-    def _build_registry(
-        self,
-        task_manager: TaskManager,
-        *,
-        session: Session | None = None,
-        store: SessionStore | None = None,
-        run_id: str | None = None,
-        provider: LLMProvider | None = None,
-        bus: EventBus | None = None,
-        child_runs_dir: Path | None = None,
-        session_id: str = "",
-        tool_whitelist: list[str] | None = None,
-        workspace_root: Path | None = None,
-        extra_tools: list[BaseTool] | None = None,
-        evidence_refs: set[str] | None = None,
-    ) -> ToolRegistry:
-        allowed: set[str] | None = (
-            set(tool_whitelist) if tool_whitelist is not None else None
-        )
-        root = (workspace_root or Path.cwd()).resolve()
-
-        def _ok(name: str) -> bool:
-            return allowed is None or name in allowed
-
-        registry = ToolRegistry()
-        for t in [
-            ReadFileTool(root, evidence_refs=evidence_refs),
-            BashTool(root),
-            WriteFileTool(root),
-            ListDirTool(root),
-        ]:
-            if _ok(t.name):
-                registry.register(t)
-        for tool in extra_tools or []:
-            if _ok(tool.name):
-                registry.register(tool)
-        for t in [
-            TaskCreateTool(task_manager),
-            TaskUpdateTool(task_manager),
-            TaskListTool(task_manager),
-            TaskGetTool(task_manager),
-        ]:
-            if _ok(t.name):
-                registry.register(t)
-        if session is not None and store is not None and run_id is not None:
-            note_tool = NoteSaveTool(store, session.id, run_id)
-            if _ok(note_tool.name):
-                registry.register(note_tool)
-        if provider is not None and bus is not None and run_id is not None:
-            runs_dir = child_runs_dir or self._runs_dir
-            if _ok("spawn_agent"):
-                registry.register(
-                    SpawnAgentTool(
-                        provider=provider,
-                        parent_bus=bus,
-                        parent_run_id=run_id,
-                        permission_manager=self._permission_manager,
-                        max_steps=self._config.agent.max_steps,
-                        task_registry=self._task_registry,
-                        runs_dir=runs_dir,
-                        session_id=session_id,
-                        depth=0,
-                    )
-                )
-            if _ok("agent_result"):
-                registry.register(AgentResultTool(self._task_registry))
-        if self._mcp_manager is not None:
-            for mcp_tool in self._mcp_manager.get_tools():
-                if _ok(mcp_tool.name):
-                    registry.register(mcp_tool)
-        return registry
-
-    # 执行一次完整的 agent run（委托给 run_and_capture，忽略返回值）
-    async def run(self, goal: str, *, run_id: str | None = None) -> None:
-        await self.run_and_capture(goal, run_id=run_id)
-
-    # 执行 agent run 并返回 RunOutcome（含最终文字结果）
+    # 执行一轮受 profile 限制的 Agent 并将事件写入指定 run 目录
     async def run_and_capture(
         self,
         goal: str,
         *,
-        run_id: str | None = None,
-        session: Session | None = None,
-        store: SessionStore | None = None,
-        system_prompt_override: str | None = None,
-        tool_whitelist: list[str] | None = None,
-        workspace_root: Path | None = None,
-        extra_tools: list[BaseTool] | None = None,
-        evidence_refs: set[str] | None = None,
-        max_steps: int | None = None,
-        compact_threshold: float | None = None,
-        summary_only_events: bool = False,
-        include_context: bool = True,
+        run_id: str,
+        profile: RunProfile,
+        run_path: Path,
     ) -> RunOutcome:
-        run_id = run_id or new_run_id()
-        profile = (
-            self._profile_factory(session)
-            if session is not None and self._profile_factory is not None
-            else None
-        )
-        if profile is not None:
-            workspace_root = workspace_root or profile.workspace_root
-            system_prompt_override = (
-                system_prompt_override or profile.system_prompt_override
-            )
-            if tool_whitelist is None:
-                tool_whitelist = profile.tool_whitelist
-            if extra_tools is None:
-                extra_tools = profile.extra_tools
-            if evidence_refs is None:
-                evidence_refs = profile.evidence_refs
-            max_steps = max_steps or profile.max_steps
-            if compact_threshold is None:
-                compact_threshold = profile.compact_threshold
-            summary_only_events = profile.summary_only_events
-            include_context = profile.include_context
-        if workspace_root is None and session is not None and session.workspace_root:
-            workspace_root = Path(session.workspace_root)
-        root = (workspace_root or Path.cwd()).resolve()
-        if session is not None and store is not None:
-            run_path = store.runs_dir(session.id) / run_id
-            history = store.read_messages(session.id)
-            notes = store.read_notes(session.id) if include_context else ""
-        else:
-            run_path = self._runs_dir / run_id
-            history = [{"role": "user", "content": goal}]
-            notes = ""
         run_path.mkdir(parents=True, exist_ok=True)
-
-        global_ctx = (
-            load_context_file(Path("~/.cyan/context.md").expanduser())
-            if include_context
-            else ""
-        )
-        project_ctx = load_context_file(root / ".cyan/context.md") if include_context else ""
-
-        task_manager = TaskManager(run_path / ".tasks")
-
-        bus = EventBus()
-
-        context = ExecutionContext(
-            run_id=run_id,
-            goal=goal,
-            max_steps=max_steps or self._config.agent.max_steps,
-            prefill_messages=history,
-            session_notes=notes,
-            global_context=global_ctx,
-            project_context=project_ctx,
-            system_prompt_override=system_prompt_override,
-        )
-        prefill_len = len(history)
-
+        local_bus = EventBus()
         async with EventWriter(
             run_path / "events.jsonl",
-            summary_only=summary_only_events,
+            summary_only=profile.summary_only_events,
         ) as writer:
-            writer.subscribe(bus)
-            for h in self._extra_handlers:
-                bus.subscribe(h)
+            writer.subscribe(local_bus)
+            for handler in self._extra_handlers:
+                local_bus.subscribe(handler)
             if self._bus is not None:
-                bus.subscribe(self._bus.publish)
-            await bus.publish(RunStartedEvent(run_id=run_id, goal=goal, ts=_now()))
-
+                local_bus.subscribe(self._bus.publish)
+            await local_bus.publish(RunStartedEvent(run_id=run_id, goal=goal, ts=_now()))
+            context = ExecutionContext(
+                run_id=run_id,
+                goal=goal,
+                max_steps=profile.max_steps,
+                system_prompt_text=profile.system_prompt,
+                max_input_bytes=profile.max_input_bytes,
+            )
+            registry = ToolRegistry()
+            for tool in profile.tools:
+                registry.register(tool)
             cancelled = False
             try:
-                provider: LLMProvider = self._provider or AnthropicProvider(
-                    self._config.llm.default_model
-                )
+                provider = self._provider or AnthropicProvider(self._config.llm.default_model)
                 if self._trace is not None:
                     provider = TracingProvider(
                         provider,
                         self._trace,
-                        include_payload=(
-                            self._config.trace.include_llm_payload
-                            and not summary_only_events
-                        ),
+                        include_payload=False,
                     )
-                session_id_str = session.id if session is not None else ""
-                child_runs_dir = (
-                    store.runs_dir(session.id)
-                    if session is not None and store is not None
-                    else self._runs_dir
-                )
-                registry = self._build_registry(
-                    task_manager,
-                    session=session,
-                    store=store,
-                    run_id=run_id,
-                    provider=provider,
-                    bus=bus,
-                    child_runs_dir=child_runs_dir,
-                    session_id=session_id_str,
-                    tool_whitelist=tool_whitelist,
-                    workspace_root=root,
-                    extra_tools=extra_tools,
-                    evidence_refs=evidence_refs,
-                )
-                session_dir = (
-                    store.session_dir(session.id)
-                    if session is not None and store is not None
-                    else run_path
-                )
-                compactor = Compactor(bus, session_dir, session_id_str)
-                loop = AgentLoop(
-                    provider, registry, bus,
-                    permission_manager=self._permission_manager,
-                    compactor=compactor,
-                    compact_threshold=(
-                        self._config.compaction.auto_threshold
-                        if compact_threshold is None
-                        else compact_threshold
-                    ),
-                    session_id=session_id_str,
-                )
-                await loop.run(context)
+                await AgentLoop(provider, registry, local_bus).run(context)
             except asyncio.CancelledError:
                 cancelled = True
                 if not context.is_done():
@@ -322,8 +114,7 @@ class AgentRunner:
                 )
                 if not context.is_done():
                     context.mark_failed("llm_error")
-
-            await bus.publish(
+            await local_bus.publish(
                 RunFinishedEvent(
                     run_id=run_id,
                     status=context.status,
@@ -332,15 +123,31 @@ class AgentRunner:
                     ts=_now(),
                 )
             )
-
-        if session is not None and store is not None:
-            store.append_messages(session.id, context.messages[prefill_len:], run_id=run_id)
-
         if cancelled:
             raise asyncio.CancelledError()
-
         return RunOutcome(
             status=context.status,
             result=context.result,
             reason=context.reason,
+            initial_input_bytes=context.initial_input_bytes,
+            peak_input_bytes=context.peak_input_bytes,
+            budget_exhausted=(
+                context.budget_exhausted or context.reason == "context_budget_exhausted"
+            ),
+        )
+
+    # 提供最小的同步语义包装，调用方必须显式传入 profile 和 run 目录
+    async def run(
+        self,
+        goal: str,
+        *,
+        run_id: str,
+        profile: RunProfile,
+        run_path: Path,
+    ) -> RunOutcome:
+        return await self.run_and_capture(
+            goal,
+            run_id=run_id,
+            profile=profile,
+            run_path=run_path,
         )

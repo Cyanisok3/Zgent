@@ -1,406 +1,95 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cyan 架构总览 · Agent Harness 深度解析</title>
-<style>
-  :root {
-    --bg: #0d1117;
-    --panel: #161b22;
-    --panel-2: #1c2129;
-    --border: #30363d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --accent-2: #3fb950;
-    --accent-3: #f0883e;
-    --accent-4: #d2a8ff;
-    --danger: #f85149;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 32px 96px; }
-  header.hero { padding: 32px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 40px; }
-  header.hero h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: -0.02em; }
-  header.hero h1 .dot { color: var(--accent-2); }
-  header.hero p { margin: 0; color: var(--muted); max-width: 760px; }
-  .meta { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
-  .tag {
-    font-family: var(--mono); font-size: 12px; padding: 3px 10px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--muted);
-  }
-  .tag.accent { color: var(--accent); border-color: #1f3a5f; background: #0d1b2a; }
-
-  h2 {
-    font-size: 22px; margin: 56px 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
-    letter-spacing: -0.01em;
-  }
-  h2 .no { color: var(--accent); font-family: var(--mono); font-size: 15px; margin-right: 8px; }
-  h3 { font-size: 17px; margin: 28px 0 10px; color: #c9d1d9; }
-  h4 { font-size: 14.5px; margin: 20px 0 8px; color: var(--accent-4); font-family: var(--mono); }
-
-  p { margin: 10px 0; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  code {
-    font-family: var(--mono); font-size: 0.9em; background: #21262d; padding: 1px 6px;
-    border-radius: 5px; color: #e6edf3;
-  }
-  pre {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
-    line-height: 1.6; color: #c9d1d9;
-  }
-  pre .c { color: var(--muted); }
-  pre .k { color: var(--accent-4); }
-  pre .s { color: var(--accent-2); }
-  pre .n { color: var(--accent-3); }
-
-  .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px 22px; margin: 16px 0;
-  }
-  .grid { display: grid; gap: 14px; }
-  .grid.c2 { grid-template-columns: repeat(2, 1fr); }
-  .grid.c3 { grid-template-columns: repeat(3, 1fr); }
-  @media (max-width: 760px) { .grid.c2, .grid.c3 { grid-template-columns: 1fr; } }
-
-  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-  tr:hover td { background: #10151c; }
-  td code { white-space: nowrap; }
-
-  .badge {
-    display: inline-block; font-family: var(--mono); font-size: 11.5px; padding: 1px 8px;
-    border-radius: 5px; font-weight: 600;
-  }
-  .b-read { color: #79c0ff; background: #0d1b2a; border: 1px solid #1f3a5f; }
-  .b-sys  { color: #d2a8ff; background: #1a1025; border: 1px solid #3d2a55; }
-  .b-ok   { color: #3fb950; background: #0d2414; border: 1px solid #1f5c2e; }
-  .b-warn { color: #f0883e; background: #241a0d; border: 1px solid #5c3a1f; }
-
-  /* 状态机流程 */
-  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0; }
-  .node {
-    font-family: var(--mono); font-size: 12.5px; padding: 8px 13px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--panel-2); white-space: nowrap;
-  }
-  .node.init { border-color: #1f5c2e; background: #0d2414; }
-  .node.term { border-color: #5c2e2e; background: #241014; }
-  .node.wait { border-color: #5c3a1f; background: #241a0d; }
-  .arrow { color: var(--muted); font-family: var(--mono); font-size: 13px; }
-  .arrow .ev { color: var(--accent); font-size: 11px; }
-
-  .callout {
-    border-left: 3px solid var(--accent-3); background: #1a140c; padding: 12px 16px;
-    border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px;
-  }
-  .callout.blue { border-left-color: var(--accent); background: #0d1b2a; }
-  .callout.green { border-left-color: var(--accent-2); background: #0d2414; }
-
-  ul.tight { margin: 8px 0; padding-left: 20px; }
-  ul.tight li { margin: 4px 0; }
-
-  .tree { font-family: var(--mono); font-size: 12.5px; line-height: 1.8; }
-  .tree .dir { color: var(--accent); }
-  .tree .com { color: var(--muted); }
-  .footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyan 当前架构</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; color: #17202a; background: #f5f7fb; line-height: 1.6; }
+    main { max-width: 1100px; margin: 0 auto; padding: 40px 24px 72px; }
+    h1, h2 { color: #102a43; }
+    .lead { font-size: 1.12rem; color: #486581; }
+    .panel { margin: 24px 0; padding: 22px; background: #fff; border: 1px solid #d9e2ec; border-radius: 12px; box-shadow: 0 3px 12px #102a4312; }
+    .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .node { padding: 10px 14px; background: #e8f1ff; border: 1px solid #9fbad0; border-radius: 8px; }
+    .arrow { color: #627d98; font-weight: 700; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre { overflow: auto; padding: 16px; background: #102a43; color: #f0f4f8; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #d9e2ec; vertical-align: top; }
+    th { color: #334e68; }
+  </style>
 </head>
 <body>
-<div class="wrap">
+<main>
+  <h1>Cyan：训练故障诊断与受控修复</h1>
+  <p class="lead">Cyan 是一个本地双进程系统。确定性的训练监督、证据选择和修复验证包围一个只执行受限工具调用的 Agent 内核。</p>
 
-<header class="hero">
-  <h1>cyan<span class="dot">.</span> — 架构总览</h1>
-  <p>面向本地 ML 训练崩溃的 <strong>Incident Agent</strong>。核心是一套受控的 <strong>Agent Harness</strong>：daemon 只监管真实训练进程，进程非零退出后才唤醒受限的只读 Agent，基于日志与工作区证据给出诊断与可选补丁，补丁经用户批准、由 harness 校验并应用，最终以原训练命令的退出码为唯一验收标准。</p>
-  <div class="meta">
-    <span class="tag">Python 3.12 · asyncio</span>
-    <span class="tag">TCP 127.0.0.1:7437 · NDJSON · JSON-RPC 2.0</span>
-    <span class="tag">Textual TUI + 薄 VS Code 客户端</span>
-    <span class="tag accent">核心行数：jobs 1018 / incidents 2765 / transport 730</span>
-  </div>
-</header>
+  <section class="panel">
+    <h2>进程与所有权</h2>
+    <div class="flow">
+      <span class="node">cyan TUI / VS Code</span><span class="arrow">→ TCP loopback / NDJSON / JSON-RPC 2.0</span>
+      <span class="node">cyan-core</span>
+    </div>
+    <p><code>training.jobs</code> 独占训练进程组和持久化日志；<code>training.incidents</code> 独占故障状态、证据、提案和验证；<code>agent</code> 只负责显式工具驱动的 LLM 运行；<code>service</code> 负责协议和传输。</p>
+  </section>
 
-<!-- ======================= 1. 系统总览 ======================= -->
-<h2><span class="no">01</span>系统总览：双进程 + 单一状态源</h2>
-<p>cyan 是一个<strong>本地双进程系统</strong>：客户端通过 TCP loopback 与 daemon 通信，daemon 是唯一持有进程组与持久化状态的权威进程。</p>
+  <section class="panel">
+    <h2>一次故障的闭环</h2>
+    <div class="flow">
+      <span class="node">/monitor 预览命令</span><span class="arrow">→</span>
+      <span class="node">JobSupervisor</span><span class="arrow">→</span>
+      <span class="node">Failure Capsule</span><span class="arrow">→</span>
+      <span class="node">Evidence Selector</span><span class="arrow">→</span>
+      <span class="node">六个受限工具的只读 Agent</span><span class="arrow">→</span>
+      <span class="node">Diagnosis / Proposal</span><span class="arrow">→</span>
+      <span class="node">人工批准</span><span class="arrow">→</span>
+      <span class="node">PatchService</span><span class="arrow">→</span>
+      <span class="node">Smoke / 原命令重跑</span>
+    </div>
+    <p>原训练命令的退出码始终是最终成功依据。Smoke 是可选的前置验证；补丁应用、重试和恢复由 Incident Coordinator 控制。</p>
+  </section>
 
-<pre><span class="c"># 进程边界与传输</span>
-cyan / cyan-tui / cyan VS Code          <span class="c"># 客户端：CLI、Textual TUI、薄 VS Code 插件</span>
-    │  TCP loopback · NDJSON framing · JSON-RPC 2.0
-cyan-core                                <span class="c"># daemon：单一状态源</span>
-    ├── <span class="k">JobSupervisor</span>         <span class="c">真实进程组唯一所有者</span>
-    ├── <span class="k">JobStore</span>             <span class="c">file-backed 任务/日志/事件持久化</span>
-    ├── <span class="k">IncidentCoordinator</span> <span class="c">故障诊断与修复编排（Agent Harness）</span>
-    ├── <span class="k">AgentRunner / AgentLoop / ToolRegistry</span>  <span class="c">通用 Agent 运行时</span>
-    └── <span class="k">EventBus / SessionManager</span></pre>
+  <section class="panel">
+    <h2>模块边界</h2>
+    <pre>src/cyan/
+├── agent/       # 最小 LLM → tool → observe → stop 内核
+├── training/    # jobs、processes、incidents 与验证闭环
+├── service/     # daemon、协议、RPC 与 TCP 传输
+├── cli/         # cyan 与 cyan core start/stop
+├── tui/         # /monitor、/start、/jobs、/incident、/help
+└── config.py    # 三个领域共享配置</pre>
+    <p>Incident profile 固定注册 <code>read_file</code>、<code>list_dir</code>、<code>search_text</code>、<code>read_job_log</code>、<code>submit_diagnosis</code>、<code>propose_patch</code>。没有写文件、Shell 或任意扩展工具。</p>
+  </section>
 
-<div class="grid c3">
-  <div class="card">
-    <h4>传输层 <code>core/transport/</code></h4>
-    <p style="font-size:13.5px;color:var(--muted)">TCP <code>127.0.0.1:7437</code>，NDJSON 按行分帧。命令/事件是 Pydantic v2 模型、按 <code>type</code> 判别联合。<code>ipc_broadcaster</code> 为每个客户端提供有界队列，慢客户端不会阻塞进程日志落盘。</p>
-  </div>
-  <div class="card">
-    <h4>协议模型 <code>core/bus/</code></h4>
-    <p style="font-size:13.5px;color:var(--muted)"><code>commands.py</code> / <code>events.py</code> / <code>envelope.py</code> 定义 JSON-RPC 信封与全部消息；由 <code>scripts/gen_protocol_doc.py</code> 生成 <code>WIRE_PROTOCOL.md</code>。</p>
-  </div>
-  <div class="card">
-    <h4>进程内事件 <code>core/events/</code></h4>
-    <p style="font-size:13.5px;color:var(--muted)">极简 in-process <code>EventBus</code> + <code>EventWriter</code>（写 <code>events.jsonl</code>）。Incident 用 <code>summary_only</code> 模式，只落状态事件、省略逐 token 与完整工具输出。</p>
-  </div>
-</div>
+  <section class="panel">
+    <h2>证据与上下文</h2>
+    <table>
+      <tr><th>组件</th><th>约束</th></tr>
+      <tr><td>Evidence Selector v1</td><td>纯函数、分块扫描不可变日志、固定优先级、最多 32 KiB；不调用 LLM、不读源码、不缓存。</td></tr>
+      <tr><td>Incident Context</td><td>每轮只放当前 Capsule、选择的证据、当前指令、上一轮有限结果和最新验证结果；总输入最多 128 KiB。</td></tr>
+      <tr><td>AgentRunner</td><td>只接受显式 RunProfile 和工具；超出预算的工具结果替换为结构化预算事件，不发送已知超限请求。</td></tr>
+    </table>
+  </section>
 
-<!-- ======================= 2. 模块地图 ======================= -->
-<h2><span class="no">02</span>模块地图</h2>
-<pre class="tree"><span class="dir">src/cyan/</span>
-├── <span class="dir">core/</span>
-│   ├── <span class="dir">jobs/</span>           <span class="com"># 训练进程监督（1018 行）</span>
-│   │   ├── supervisor.py     <span class="n">404</span>  <span class="com">JobSupervisor：进程组唯一所有者</span>
-│   │   ├── store.py          <span class="n">313</span>  <span class="com">JobStore：文件持久化 + 日志游标</span>
-│   │   ├── launch.py         <span class="n">211</span>  <span class="com">训练命令解析/预览（不经 shell）</span>
-│   │   └── models.py         <span class="n">90</span>   <span class="com">Job / Attempt / Failure / 事件模型</span>
-│   ├── <span class="dir">incidents/</span>      <span class="com"># Incident Harness（2765 行）★核心</span>
-│   │   ├── coordinator.py    <span class="n">1239</span> <span class="com">编排：诊断→审批→补丁→smoke→重跑→恢复</span>
-│   │   ├── fsm.py            <span class="n">142</span>  <span class="com">纯状态机：转移表 + 恢复策略（单一事实源）</span>
-│   │   ├── patch.py          <span class="n">449</span>  <span class="com">PatchService：diff 生成/四重校验/应用/回滚</span>
-│   │   ├── tools.py          <span class="n">377</span>  <span class="com">submit_diagnosis / propose_patch 工具</span>
-│   │   ├── log_tool.py       <span class="n">245</span>  <span class="com">read_job_log：256KiB 证据预算读取器</span>
-│   │   ├── smoke.py          <span class="n">196</span>  <span class="com">可选 smoke verifier 子进程执行器</span>
-│   │   ├── store.py          <span class="n">167</span>  <span class="com">IncidentStore：原子写 incident 制品</span>
-│   │   └── models.py         <span class="n">150</span>  <span class="com">Incident / Diagnosis / Proposal 等模型</span>
-│   ├── <span class="dir">transport/</span>      <span class="com"># 传输层（730 行）</span>
-│   │   ├── socket_server.py  <span class="n">407</span>  <span class="com">TCP JSON-RPC 服务端</span>
-│   │   ├── ipc_broadcaster.py <span class="n">217</span> <span class="com">有界 per-client 队列广播</span>
-│   │   └── socket_client.py  <span class="n">106</span>  <span class="com">客户端（TUI / CLI 共用）</span>
-│   ├── runner.py            <span class="n">346</span>  <span class="com">AgentRunner + RunProfile（运行时装配）</span>
-│   ├── loop.py              <span class="n">133</span>  <span class="com">AgentLoop：plan→act→observe 循环</span>
-│   ├── app.py               <span class="n">834</span>  <span class="com">daemon 入口：装配 + RPC 路由</span>
-│   ├── <span class="dir">tools/</span>           <span class="com">通用工具集（read/write/bash/task/note…）</span>
-│   ├── <span class="dir">session/</span>         <span class="com">SessionManager + SessionStore</span>
-│   ├── <span class="dir">permissions/</span>    <span class="com">工具权限审批（普通聊天用）</span>
-│   └── <span class="dir">mcp/ subagent/ skills/ memory/ compact/ task/</span>  <span class="com">通用运行时能力（Incident 禁用）</span>
-├── <span class="dir">tui/</span>               <span class="com">Textual TUI（app.py 1715 行）</span>
-└── <span class="dir">cli/</span>               <span class="com">cyan 命令行入口</span>
-<span class="dir">vscode/</span>                  <span class="com">薄 TypeScript 客户端（约 1400 行）</span></pre>
+  <section class="panel">
+    <h2>持久化</h2>
+    <pre>~/.cyan/jobs/&lt;job_id&gt;/incidents/&lt;incident_id&gt;/
+├── incident.json
+├── proposal.diff                 # 有提案时才存在
+├── smoke.stdout.log              # 运行 Smoke 时才存在
+├── smoke.stderr.log
+└── runs/&lt;run_id&gt;/
+    ├── run.json
+    └── events.jsonl</pre>
+    <p><code>incident.json</code> 是当前快照；<code>run.json</code> 是单轮有限记录；<code>events.jsonl</code> 只保存摘要事件，用于重连回放和运行评测。完整训练日志仍属于 Job Attempt，不复制进 Incident。</p>
+  </section>
 
-<!-- ======================= 3. 通用运行时 vs Harness ======================= -->
-<h2><span class="no">03</span>核心洞察：通用 Agent 运行时，受控的 Incident Profile</h2>
-<p>仓库里有一个<strong>通用 Agent 运行时</strong>（<code>AgentRunner</code> + <code>AgentLoop</code> + 工具注册表 + 权限/压缩/子代理/MCP）。Incident Harness <strong>复用同一引擎</strong>，但通过一个 <code>RunProfile</code> 把它收敛成"受限事故调查员"——不另起炉灶，而是换一张受限的 profile。</p>
-
-<div class="grid c2">
-  <div class="card">
-    <h4>通用运行时（普通聊天）</h4>
-    <ul class="tight" style="font-size:13.5px">
-      <li>工具：<code>read_file / write_file / bash / list_dir / task_* / note_save / spawn_agent / MCP…</code></li>
-      <li>加载全局 <code>~/.cyan/context.md</code> 与项目 <code>.cyan/context.md</code></li>
-      <li>可启用上下文压缩、分层记忆、子代理、MCP</li>
-    </ul>
-  </div>
-  <div class="card" style="border-color:#1f3a5f">
-    <h4>Incident Profile（只读事故调查）</h4>
-    <ul class="tight" style="font-size:13.5px">
-      <li>工具白名单 <code>6 个只读工具</code>（见 §05）</li>
-      <li><code>max_steps = 12</code>（步数上限）</li>
-      <li><code>compact_threshold = 0.0</code>（禁用压缩，profile 不可被压缩移除）</li>
-      <li><code>summary_only_events = True</code>（不落逐 token）</li>
-      <li><code>include_context = False</code>（不读全局/项目 context、session notes）</li>
-      <li><code>evidence_refs</code>（本轮工具实际返回的证据引用登记表）</li>
-    </ul>
-  </div>
-</div>
-
-<div class="callout blue">
-  <strong>为什么这样设计：</strong>把"智能"留给 LLM，把"确定性"留给 harness。诊断/补丁的<em>内容</em>由模型产生，但 <strong>diff 的生成、四重校验、应用、回滚、验收全部由 harness 完成、不依赖模型输出质量</strong>。这是整个产品安全性的根基。
-</div>
-
-<!-- ======================= 4. Jobs 层 ======================= -->
-<h2><span class="no">04</span>Jobs 层：真实进程监督</h2>
-
-<h3>4.1 JobSupervisor —— 进程组唯一所有者</h3>
-<div class="card">
-  <ul class="tight" style="font-size:14px">
-    <li>用 <code>asyncio.create_subprocess_exec</code> 启动，<strong>分离 stdout/stderr 各自 drain</strong>到磁盘日志；不用通用 120 秒 <code>BashTool</code>。</li>
-    <li>被监督的训练进程为<strong>非交互</strong>（<code>DEVNULL</code> stdin）。</li>
-    <li>精确持久化 <code>argv / cwd / env</code> 用于重跑；成为父进程但<strong>不主动限制 CPU/GPU</strong>。</li>
-    <li>崩溃后可终止整棵<strong>进程组</strong>（session leader + process group leader 校验）。</li>
-  </ul>
-</div>
-
-<h3>4.2 JobStore —— 文件即真相</h3>
-<pre class="tree">~/.cyan/jobs/&lt;job_id&gt;/
-├── job.json              <span class="com"># 公开任务状态</span>
-├── events.jsonl          <span class="com"># 状态事件序列（seq 递增，可修复损坏尾部）</span>
-├── launch.json           <span class="com"># 私有启动信息，0600，永不通过 RPC 返回/暴露给 Agent</span>
-├── attempts/&lt;attempt_id&gt;/
-│   ├── attempt.json      <span class="com"># 单次尝试状态</span>
-│   ├── stdout.log        <span class="com"># 原始 stdout（按 byte cursor 读取）</span>
-│   ├── stderr.log        <span class="com"># 原始 stderr</span>
-│   └── failure.json      <span class="com"># 失败快照 + FailureCapsule</span>
-└── incidents/&lt;incident_id&gt;/   <span class="com"># 见 §05.6</span></pre>
-<p style="font-size:13.5px;color:var(--muted)">日志只写磁盘、不逐行进 EventBus；TUI 按 <code>byte cursor</code> 读取并续传，完整日志留在磁盘。daemon 重启时 <code>recover_interrupted()</code> 把遗留的 starting/running 任务封口为 interrupted。</p>
-
-<!-- ======================= 5. Incident Harness ======================= -->
-<h2><span class="no">05</span>Incident Harness：故障驱动的诊断与修复闭环</h2>
-
-<h3>5.1 一条故障的完整生命周期</h3>
-<pre><span class="c">真实非零退出 / 异常信号</span>
-   → <span class="k">FailureCapsule</span>（封口日志快照 + Git + 启动信息）
-   → 唤醒<span class="s">只读 Agent</span>（先取证，再 <code>submit_diagnosis</code>，可选 <code>propose_patch</code>）
-   → <span class="k">awaiting_approval</span>（diagnosis + evidence + diff 一起展示）
-   → 用户批准 → harness 校验并 <code>git apply</code>
-   → 可选 <span class="k">smoke</span>（用户声明式 verifier）
-   → <span class="k">原命令重跑</span>，退出码 = 最终真值
-   → <code>resolved</code> / 失败则复诊</pre>
-
-<h3>5.2 FailureCapsule —— 一次性取证快照</h3>
-<p style="font-size:13.5px">进程失败后，harness 把这一刻钉死成一个不可变胶囊，Agent 只能基于它和当前工作区调查：</p>
-<pre>FailureCapsule(
-    job_id / attempt_id / argv / cwd,
-    failure_kind: launch_error | process_exit | supervisor_error,
-    returncode / signal,  git_head,  dirty_paths[:200],
-    environment: <span class="c"># 仅白名单前缀 CUDA_/NCCL_/TORCH_ 等，剔除密钥</span>
-    stdout: LogSnapshot(size, sha256, included_start/end, tail),
-    stderr: LogSnapshot(...),
-)</pre>
-
-<h3>5.3 只读工具集（6 个）</h3>
-<table>
-  <tr><th>工具</th><th>类型</th><th>说明</th></tr>
-  <tr><td><code>read_file</code></td><td><span class="badge b-read">只读</span></td><td>读工作区文件（≤64KiB，纯文本），返回带 <code>path@sha256#line</code> 的证据引用</td></tr>
-  <tr><td><code>list_dir</code></td><td><span class="badge b-read">只读</span></td><td>列目录</td></tr>
-  <tr><td><code>search_text</code></td><td><span class="badge b-read">只读</span></td><td>工作区文本检索，返回证据引用</td></tr>
-  <tr><td><code>read_job_log</code></td><td><span class="badge b-read">只读</span></td><td>按 byte 范围读当前 incident 的日志；<strong>全周期 256 KiB 证据预算</strong></td></tr>
-  <tr><td><code>submit_diagnosis</code></td><td><span class="badge b-sys">结构化</span></td><td>提交诊断（category/summary/root_cause/evidence/confidence），evidence 必须引用已观察引用</td></tr>
-  <tr><td><code>propose_patch</code></td><td><span class="badge b-sys">结构化</span></td><td>单文件精确 <code>SEARCH/REPLACE</code>，harness 在内存生成 diff，<strong>绝不改工作区</strong></td></tr>
-</table>
-<div class="callout green"><strong>硬边界：</strong>Incident session <strong>不注册</strong> <code>write / bash / MCP / Skill / TaskManager / subagent</code> 工具，不加载全局/项目 context 与 session notes，不允许手动压缩覆盖 profile。</div>
-
-<h3>5.4 状态机 —— 单一事实源 <code>incidents/fsm.py</code></h3>
-<p style="font-size:13.5px;color:var(--muted)">状态流转由一张<strong>声明式转移表</strong>表达；运行时校验、mermaid 文档、单元测试都从同一张表派生。调用方只发<strong>事件</strong>（<code>_dispatch(event)</code>），机器算出目标状态；非法转移抛 <code>IllegalTransitionError</code>。</p>
-
-<div class="flow">
-  <span class="node init">[*]</span><span class="arrow">→</span>
-  <span class="node init">diagnosing</span>
-  <span class="arrow">—<span class="ev">INVESTIGATION_DONE</span>→</span>
-  <span class="node wait">awaiting_approval</span>
-  <span class="arrow">—<span class="ev">APPROVE</span>→</span>
-  <span class="node">applying</span>
-  <span class="arrow">—<span class="ev">APPLY_OK_SMOKE</span>→</span>
-  <span class="node">smoke_running</span>
-  <span class="arrow">—<span class="ev">SMOKE_PASSED</span>→</span>
-  <span class="node">smoke_passed</span>
-  <span class="arrow">—<span class="ev">RETRY_STARTED</span>→</span>
-  <span class="node">retry_running</span>
-  <span class="arrow">—<span class="ev">RETRY_SUCCEEDED</span>→</span>
-  <span class="node term">resolved</span><span class="arrow">→</span><span class="node term">[*]</span>
-</div>
-<p style="font-size:13px;color:var(--muted)">（happy path；<code>smoke_skipped</code> 是 <code>applying</code> 的平行分支，失败/回滚/复诊见下表）</p>
-
-<table>
-  <tr><th>源状态</th><th>事件</th><th>目标状态</th></tr>
-  <tr><td><code>diagnosing</code></td><td><code>INVESTIGATION_DONE</code></td><td><code>awaiting_approval</code></td></tr>
-  <tr><td><code>diagnosing</code></td><td><code>INVESTIGATION_FAILED</code></td><td><code>unresolved</code></td></tr>
-  <tr><td><code>awaiting_approval</code></td><td><code>APPROVE</code></td><td><code>applying</code></td></tr>
-  <tr><td><code>awaiting_approval</code></td><td><code>APPROVE_INVALIDATED</code></td><td><code>stale</code></td></tr>
-  <tr><td><code>awaiting_approval</code></td><td><code>REJECT</code></td><td><code>rejected</code>（终态）</td></tr>
-  <tr><td><code>awaiting_approval</code></td><td><code>FOLLOW_UP</code></td><td><code>diagnosing</code></td></tr>
-  <tr><td><code>applying</code></td><td><code>APPLY_OK_SMOKE</code> / <code>APPLY_OK_NO_SMOKE</code></td><td><code>smoke_running</code> / <code>smoke_skipped</code></td></tr>
-  <tr><td><code>applying</code></td><td><code>APPLY_FAILED</code></td><td><code>stale</code></td></tr>
-  <tr><td><code>applying</code></td><td><code>SMOKE_FAILED_ROLLED_BACK</code> / <code>…ROLLBACK_BLOCKED</code></td><td><code>diagnosing</code> / <code>rollback_blocked</code></td></tr>
-  <tr><td><code>smoke_running</code></td><td><code>SMOKE_PASSED</code></td><td><code>smoke_passed</code></td></tr>
-  <tr><td><code>smoke_running</code></td><td><code>SMOKE_FAILED_ROLLED_BACK</code> / <code>…ROLLBACK_BLOCKED</code></td><td><code>diagnosing</code> / <code>rollback_blocked</code></td></tr>
-  <tr><td><code>smoke_passed</code> / <code>smoke_skipped</code></td><td><code>RETRY_STARTED</code></td><td><code>retry_running</code></td></tr>
-  <tr><td><code>retry_running</code></td><td><code>RETRY_SUCCEEDED</code></td><td><code>resolved</code>（终态）</td></tr>
-  <tr><td><code>retry_running</code></td><td><code>RETRY_ABORTED</code></td><td><code>unresolved</code></td></tr>
-  <tr><td><code>retry_running</code></td><td><code>RETRY_FAILED</code></td><td><code>diagnosing</code>（复诊）</td></tr>
-  <tr><td><code>stale</code> / <code>unresolved</code> / <code>rollback_blocked</code></td><td><code>FOLLOW_UP</code></td><td><code>diagnosing</code></td></tr>
-</table>
-
-<h4>崩溃恢复：状态是属性，不是散落的 if</h4>
-<table>
-  <tr><th>恢复动作</th><th>状态</th><th>语义</th></tr>
-  <tr><td><code>reconcile</code></td><td><code>diagnosing / awaiting_approval / retry_running</code></td><td>从磁盘制品重建状态（例如 retry_running + job succeeded → resolved）</td></tr>
-  <tr><td><code>quarantine</code></td><td><code>applying / smoke_running / smoke_passed / smoke_skipped</code></td><td>半途无法确认是否已改盘 → 先杀掉可确认的 smoke 进程再降级 unresolved</td></tr>
-  <tr><td><code>keep</code></td><td><code>resolved / rejected / stale / unresolved / rollback_blocked</code></td><td>终态/可等待态，原样保留</td></tr>
-</table>
-
-<h3>5.5 受控补丁链路 —— harness 拥有确定性</h3>
-<div class="card">
-  <p style="margin-top:0"><strong>约束</strong>：模型只输出一个<code>已有</code> UTF-8 文本文件（≤1 MiB）里的一次<strong>精确唯一</strong> <code>SEARCH/REPLACE</code>，<strong>不写 diff 头/hunk/行号、不创建/删除/重命名/模糊匹配</strong>。</p>
-  <ol class="tight" style="font-size:14px">
-    <li><strong>证据校验</strong>：proposal 必须引用本轮工具实际返回的 <code>path@sha256#line</code>，且 SEARCH 文本与当前文件唯一匹配（最多允许一次校正反馈）。</li>
-    <li><strong>harness 生成 diff</strong>：在内存做唯一替换 → 生成 <code>UnifiedDiff</code> → 只写为私有 artifact（<code>proposal.diff</code>）。<strong>批准前工作区零写入。</strong></li>
-    <li><strong>四重校验</strong>：路径解析（限制在 workspace 内）、文件 SHA-256、Git base / submodule 边界、<code>git apply --check</code>。</li>
-    <li><strong>批准后应用</strong>：<code>git apply</code> → 写 <code>apply.json</code>（应用后文件哈希凭据）。</li>
-    <li><strong>安全回滚</strong>：smoke/重跑失败时，仅在目标文件哈希仍等于 apply 后哈希时才反向应用；否则 <code>rollback_blocked</code>。</li>
-  </ol>
-</div>
-
-<h3>5.6 审批、smoke 与最终验收</h3>
-<ul class="tight" style="font-size:14px">
-  <li><strong>审批</strong>：<code>awaiting_approval</code> 时展示 diagnosis + evidence + diff，用户 <code>approve</code> / <code>reject</code>。批准前会核对 smoke 配置<strong>指纹</strong>，漂移则 <code>stale</code>。</li>
-  <li><strong>smoke（可选，用户声明）</strong>：项目 <code>.cyan/config.toml</code> 的 <code>[incident.smoke]</code> 声明 <code>argv + timeout</code>；Agent 不能生成或修改它。失败则回滚并让同一只读 session 复诊。</li>
-  <li><strong>最终验收 = 原命令退出码</strong>：重跑<strong>精确原 argv/cwd/env</strong>，退出码 0 才算 <code>resolved</code>。smoke 只是廉价代理，不是真值。</li>
-</ul>
-
-<h3>5.7 Incident 制品布局</h3>
-<pre class="tree">incidents/&lt;incident_id&gt;/
-├── incident.json          <span class="com"># 状态 + active_run/proposal 指针</span>
-├── diagnosis.json         <span class="com"># 结构化诊断（含 evidence）</span>
-├── proposal.json          <span class="com"># 补丁元数据（patch_sha256 + 文件清单）</span>
-├── proposal.diff          <span class="com"># harness 生成的 unified diff</span>
-├── apply.json             <span class="com"># 应用后文件哈希凭据（回滚依据）</span>
-├── smoke.json             <span class="com"># smoke verifier 结果</span>
-├── smoke-execution.json   <span class="com"># smoke 子进程身份（PID + lstart）</span>
-└── evidence_usage.json    <span class="com"># 日志证据预算用量</span></pre>
-
-<!-- ======================= 6. 安全不变量 ======================= -->
-<h2><span class="no">06</span>安全不变量一览</h2>
-<table>
-  <tr><th>不变量</th><th>机制</th></tr>
-  <tr><td>批准前工作区零写入</td><td>diff 只落私有 artifact；<code>propose_patch</code> 从不改工作区</td></tr>
-  <tr><td>Agent 无 shell / 无写文件能力</td><td>Incident profile 只注册 6 个只读/结构化工具</td></tr>
-  <tr><td>证据不可伪造</td><td>evidence 引用必须命中本轮工具返回的登记表；日志引用按 byte 范围校验</td></tr>
-  <tr><td>补丁不可漂移</td><td>路径 / SHA-256 / Git base / submodule / <code>git apply --check</code> 四重校验</td></tr>
-  <tr><td>回滚可审计</td><td><code>apply.json</code> 记录应用后哈希，仅哈希未变才反向应用</td></tr>
-  <tr><td>私密信息不外泄</td><td><code>launch.json</code> 0600、不返回 RPC、不暴露给 Agent；环境变量按白名单脱敏</td></tr>
-  <tr><td>慢客户端不阻塞</td><td>IPC 每客户端有界队列；日志走 byte cursor 不逐行广播</td></tr>
-  <tr><td>崩溃可恢复</td><td>状态机 <code>recover_action</code> + 文件持久化；smoke 进程终止前校验 PID/身份/session/pgroup</td></tr>
-</table>
-
-<!-- ======================= 7. 设计取舍 ======================= -->
-<h2><span class="no">07</span>关键设计取舍</h2>
-<div class="grid c2">
-  <div class="card">
-    <h4>读多不写 + 人工审批</h4>
-    <p style="font-size:13.5px;color:var(--muted)">牺牲自动化率，换取全程可审计与零误写。宁可用一道批准门槛降低吞吐，也不让模型直接改工作区。</p>
-  </div>
-  <div class="card">
-    <h4>模型给智能，harness 给确定性</h4>
-    <p style="font-size:13.5px;color:var(--muted)">diff 生成、校验、回滚、验收全部是确定性代码；模型只负责"改哪一行"。诊断准确率来自 LLM，安全边界来自 harness。</p>
-  </div>
-  <div class="card">
-    <h4>退出码 = 客观真值</h4>
-    <p style="font-size:13.5px;color:var(--muted)">用原训练命令退出码做唯一验收，形成可自动判定的闭环。9 例真实 LLM 验证：诊断 9/9，6 个代码故障首次批准后全部修复，3 个非代码故障零冗余补丁。</p>
-  </div>
-  <div class="card">
-    <h4>单文件单处替换</h4>
-    <p style="font-size:13.5px;color:var(--muted)">刻意不做多文件/多 hunk 补丁。范围越窄，校验越强、回滚越简单。这是产品边界，不是能力缺失。</p>
-  </div>
-</div>
-
-<div class="footer">
-  由项目源码（<code>AGENTS.md</code> / <code>README.md</code> / <code>src/cyan/core/jobs</code> / <code>src/cyan/core/incidents</code>）整理生成 · 状态机单一事实源：<code>src/cyan/core/incidents/fsm.py</code>
-</div>
-
-</div>
+  <section class="panel">
+    <h2>协议与公开表面</h2>
+    <p>Wire Protocol v2 保留启动、停止、订阅、Job、Incident、Run、Step、Tool 和 LLM 事件，并提供 <code>incident.follow_up</code>。TUI 是正常用户的唯一入口；公开命令为 <code>cyan</code>、<code>cyan --version</code>、<code>cyan core start [--json]</code>、<code>cyan core stop</code> 和内部的 <code>cyan-core</code>。</p>
+  </section>
+</main>
 </body>
 </html>

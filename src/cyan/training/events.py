@@ -31,7 +31,6 @@ class IncidentOpenedEvent(BaseModel):
     job_id: str
     incident_id: str
     attempt_id: str
-    session_id: str | None = None
     run_id: str | None = None
     ts: str
 

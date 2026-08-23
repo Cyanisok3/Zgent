@@ -2,150 +2,125 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 from cyan.service.transport.socket_client import SocketClient
 
 
-# 功能：验证 agent.run 命令返回非空 run_id，且 daemon 随即广播 run.started 事件
-# 设计：用 SocketClient 封装 IPC 层，asyncio.Event 等待事件而非轮询，
-#       timeout=5s 防测试挂起；run.started 在 LLM 调用前触发，无需真实 API Key
-async def test_agent_run_returns_run_id_and_emits_started(
+# 功能：验证 VS Code/ TUI 共用的 launch.start 会启动真实 Job 并广播生命周期事件
+# 设计：使用真实子进程和双进程 TCP daemon，不再调用已删除的 agent.run RPC
+async def test_launch_start_returns_job_and_emits_events(
     running_daemon: subprocess.Popen[bytes],
     free_port: int,
+    tmp_path: Path,
 ) -> None:
+    del running_daemon
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     client = SocketClient("127.0.0.1", free_port)
     await client.connect()
+    events: list[dict[str, Any]] = []
 
-    started_event: asyncio.Event = asyncio.Event()
-    received: dict[str, Any] = {}
-
+    # 收集 Job 生命周期事件
     async def on_event(event: dict[str, Any]) -> None:
-        if event.get("type") == "run.started":
-            received.update(event)
-            started_event.set()
+        if str(event.get("type", "")).startswith("job."):
+            events.append(event)
 
     client.on_event(on_event)
-    loop_task = asyncio.create_task(client.run_event_loop())
-
+    event_task = asyncio.create_task(client.run_event_loop())
     try:
-        await client.send_command("event.subscribe", {"topics": ["run.*"], "scope": "global"})
-        result = await client.send_command("agent.run", {"goal": "hello"})
-
-        assert result.get("run_id"), "run_id must be non-empty"
-        returned_run_id: str = result["run_id"]
-
-        await asyncio.wait_for(started_event.wait(), timeout=5.0)
-        assert received.get("run_id") == returned_run_id
-        assert received.get("goal") == "hello"
+        preview = await client.send_command(
+            "launch.preview",
+            {
+                "command": f"{sys.executable} -c \"print('ok')\"",
+                "workspace_root": str(workspace),
+            },
+        )
+        started = await client.send_command(
+            "launch.start",
+            {
+                "command": f"{sys.executable} -c \"print('ok')\"",
+                "workspace_root": str(workspace),
+                "preview_fingerprint": preview["fingerprint"],
+            },
+        )
+        job_id = str(started["job_id"])
+        await client.send_command(
+            "event.subscribe",
+            {"topics": ["job.*"], "scope": f"job:{job_id}"},
+        )
+        deadline = asyncio.get_running_loop().time() + 5
+        while True:
+            snapshot = await client.send_command("job.get", {"job_id": job_id})
+            if snapshot["job"]["status"] not in {"starting", "running"}:
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("job did not finish")
+            await asyncio.sleep(0.05)
+        assert snapshot["job"]["status"] == "succeeded"
+        assert any(event.get("type") == "job.finished" for event in events)
     finally:
-        loop_task.cancel()
-        await asyncio.gather(loop_task, return_exceptions=True)
+        event_task.cancel()
+        await asyncio.gather(event_task, return_exceptions=True)
         await client.close()
 
 
-# 功能：验证两个独立客户端同时订阅后，其中一个触发 agent.run，两个都能收到 run.started 广播
-# 设计：两个 SocketClient 并行等待事件（asyncio.gather），确认 IpcEventBroadcaster 的扇出语义；
-#       不需要两个客户端都发命令，只验证广播覆盖所有订阅者
-async def test_two_clients_both_receive_broadcast(
+# 功能：验证两个独立客户端都能收到同一 Job 的 daemon 事件扇出
+# 设计：在两个连接上订阅后启动真实命令，覆盖 IPC broadcaster 的双进程边界
+async def test_two_clients_receive_job_broadcast(
     running_daemon: subprocess.Popen[bytes],
     free_port: int,
+    tmp_path: Path,
 ) -> None:
+    del running_daemon
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     client1 = SocketClient("127.0.0.1", free_port)
     client2 = SocketClient("127.0.0.1", free_port)
     await client1.connect()
     await client2.connect()
+    received = [asyncio.Event(), asyncio.Event()]
 
-    event1: asyncio.Event = asyncio.Event()
-    event2: asyncio.Event = asyncio.Event()
-
+    # 为每个客户端设置独立完成事件
     async def on_event1(event: dict[str, Any]) -> None:
-        if event.get("type") == "run.started":
-            event1.set()
+        if event.get("type") == "job.finished":
+            received[0].set()
 
+    # 收集第二个客户端的完成事件
     async def on_event2(event: dict[str, Any]) -> None:
-        if event.get("type") == "run.started":
-            event2.set()
+        if event.get("type") == "job.finished":
+            received[1].set()
 
     client1.on_event(on_event1)
     client2.on_event(on_event2)
-
     loop1 = asyncio.create_task(client1.run_event_loop())
     loop2 = asyncio.create_task(client2.run_event_loop())
-
     try:
-        await client1.send_command("event.subscribe", {"topics": ["run.*"], "scope": "global"})
-        await client2.send_command("event.subscribe", {"topics": ["run.*"], "scope": "global"})
-        await client1.send_command("agent.run", {"goal": "broadcast test"})
-
-        await asyncio.wait_for(
-            asyncio.gather(event1.wait(), event2.wait()),
-            timeout=5.0,
+        preview = await client1.send_command(
+            "launch.preview",
+            {
+                "command": f"{sys.executable} -c \"print('broadcast')\"",
+                "workspace_root": str(workspace),
+            },
         )
+        started = await client1.send_command(
+            "launch.start",
+            {
+                "command": f"{sys.executable} -c \"print('broadcast')\"",
+                "workspace_root": str(workspace),
+                "preview_fingerprint": preview["fingerprint"],
+            },
+        )
+        job_id = str(started["job_id"])
+        scope = {"topics": ["job.*"], "scope": f"job:{job_id}"}
+        await client1.send_command("event.subscribe", scope)
+        await client2.send_command("event.subscribe", scope)
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in received)), timeout=5)
     finally:
         loop1.cancel()
         loop2.cancel()
         await asyncio.gather(loop1, loop2, return_exceptions=True)
         await client1.close()
-        await client2.close()
-
-
-# 功能：验证客户端断开后使用 replay_from_run 重连，订阅响应中 replayed_count > 0
-# 设计：client1 触发 run 并等到 run.started 落盘（run.started 在 LLM 调用前写入 events.jsonl），
-#       稍作等待后断开；client2 用 replay_from_run=run_id 订阅，断言 replayed_count > 0，
-#       不依赖 API Key，只需验证 replay 机制读出了已落盘的 run.started
-async def test_disconnect_and_replay_from_run(
-    running_daemon: subprocess.Popen[bytes],
-    free_port: int,
-) -> None:
-    # Phase 1: trigger a run and wait for run.started to be written to disk
-    client1 = SocketClient("127.0.0.1", free_port)
-    await client1.connect()
-
-    started_event: asyncio.Event = asyncio.Event()
-    run_id_holder: list[str] = []
-
-    async def on_event(event: dict[str, Any]) -> None:
-        if event.get("type") == "run.started":
-            run_id_holder.append(event.get("run_id", ""))
-            started_event.set()
-
-    client1.on_event(on_event)
-    loop1 = asyncio.create_task(client1.run_event_loop())
-
-    try:
-        await client1.send_command("event.subscribe", {"topics": ["run.*"], "scope": "global"})
-        await client1.send_command("agent.run", {"goal": "replay test"})
-        await asyncio.wait_for(started_event.wait(), timeout=5.0)
-    finally:
-        loop1.cancel()
-        await asyncio.gather(loop1, return_exceptions=True)
-        await client1.close()
-
-    assert run_id_holder, "run.started was never received"
-    run_id = run_id_holder[0]
-
-    # Brief pause to ensure the event is flushed to disk before we replay
-    await asyncio.sleep(0.05)
-
-    # Phase 2: reconnect with replay_from_run and verify replayed_count > 0
-    client2 = SocketClient("127.0.0.1", free_port)
-    await client2.connect()
-    loop2 = asyncio.create_task(client2.run_event_loop())
-
-    try:
-        result = await client2.send_command(
-            "event.subscribe",
-            {
-                "topics": ["run.*"],
-                "scope": "global",
-                "replay_from_run": run_id,
-            },
-        )
-        assert result.get("replayed_count", 0) > 0, (
-            f"Expected replayed_count > 0 for run_id={run_id!r}, got {result}"
-        )
-    finally:
-        loop2.cancel()
-        await asyncio.gather(loop2, return_exceptions=True)
         await client2.close()

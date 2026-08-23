@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from cyan.config import CyanConfig
+from cyan.service.protocol.commands import WIRE_PROTOCOL_VERSION
 from cyan.service.transport.socket_client import SocketClient
 
 _CORE_LIFECYCLE_TIMEOUT_SECONDS = 15.0
@@ -118,7 +119,9 @@ def _print_start_result(
     if json_output:
         discovered_pid = metadata.get("pid") if metadata is not None else None
         protocol_version = (
-            metadata.get("protocol_version") if metadata is not None else None
+            metadata.get("protocol_version")
+            if metadata is not None
+            else WIRE_PROTOCOL_VERSION
         )
         print(
             json.dumps(
@@ -245,15 +248,6 @@ async def _wait_for_start_slot(config: CyanConfig) -> bool:
             return False
         await asyncio.sleep(0.05)
     raise RuntimeError("core did not become available")
-
-
-# 打印 daemon 当前状态（running / not running）
-def cmd_core_status(config: CyanConfig) -> None:
-    try:
-        asyncio.run(_ping_check(config))
-        print(f"running  ({config.host}:{config.port})")
-    except (ConnectionRefusedError, OSError):
-        print("not running")
 
 
 # 在后台启动 daemon，若已在运行则提示并退出

@@ -1,4 +1,4 @@
-export const WIRE_PROTOCOL_VERSION = 1;
+export const WIRE_PROTOCOL_VERSION = 2;
 
 export type JsonObject = Record<string, unknown>;
 
@@ -8,7 +8,7 @@ export interface CoreStartResult {
   port: number;
   pid?: number | null;
   workspace_root: string;
-  protocol_version?: number | null;
+  protocol_version: number;
 }
 
 export interface PongResult {

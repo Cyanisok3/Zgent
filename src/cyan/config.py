@@ -14,7 +14,6 @@ _DEFAULT_LOG_LEVEL = "INFO"
 _DEFAULT_LOG_FILE = "~/.cyan/logs/core.log"
 _DEFAULT_LOG_FORMAT = "text"
 _DEFAULT_CONFIG_PATH = "~/.cyan/config.toml"
-_DEFAULT_MAX_STEPS = 20
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 _DEFAULT_TRACE_FILE = "~/.cyan/traces/daemon.jsonl"
 
@@ -23,53 +22,18 @@ _DEFAULT_TRACE_FILE = "~/.cyan/traces/daemon.jsonl"
 class LoggingConfig:
     level: str = _DEFAULT_LOG_LEVEL
     file: str = _DEFAULT_LOG_FILE
-    format: str = _DEFAULT_LOG_FORMAT  # "text" | "json"
-
-
-@dataclass
-class AgentConfig:
-    max_steps: int = _DEFAULT_MAX_STEPS
+    format: str = _DEFAULT_LOG_FORMAT
 
 
 @dataclass
 class LlmConfig:
     default_model: str = _DEFAULT_MODEL
-    router: str = "static"  # "static" | "rule_based" (S4) | "cost_budget" (S6)
 
 
 @dataclass
 class TraceConfig:
     enabled: bool = True
     file: str = _DEFAULT_TRACE_FILE
-    include_llm_payload: bool = False  # 仅显式调试时才落完整 LLM payload
-
-
-@dataclass
-class PermissionConfig:
-    timeout_s: float = 60.0  # 审批超时秒数；0 表示不超时
-
-
-@dataclass
-class CompactionConfig:
-    auto_threshold: float = 0.0  # context_pct 触发阈值，0 表示禁用
-    tool_result_limit: int = 8_000  # tool_result 截断触发字符数
-    tool_result_keep: int = 4_000   # 截断后保留的前缀字符数
-
-
-@dataclass
-class McpServerConfig:
-    name: str
-    transport: str = "stdio"       # "stdio" | "tcp"
-    command: str = ""              # stdio 专用：可执行文件路径
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    host: str = "localhost"        # tcp 专用
-    port: int = 3000               # tcp 专用
-
-
-@dataclass
-class McpConfig:
-    servers: list[McpServerConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -77,367 +41,109 @@ class CyanConfig:
     host: str = _DEFAULT_HOST
     port: int = _DEFAULT_PORT
     logging: LoggingConfig = field(default_factory=LoggingConfig)
-    agent: AgentConfig = field(default_factory=AgentConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     trace: TraceConfig = field(default_factory=TraceConfig)
-    permission: PermissionConfig = field(default_factory=PermissionConfig)
-    compaction: CompactionConfig = field(default_factory=CompactionConfig)
-    mcp: McpConfig = field(default_factory=McpConfig)
 
 
-# 构建并返回运行时配置：默认值 → 全局 TOML → 项目本地 TOML → .env → 系统环境变量（后者优先级最高）
+# 构建运行时配置，只保留 daemon、LLM 和脱敏 trace 所需的字段
 def get_config() -> CyanConfig:
     config = CyanConfig()
-
-    # .env 必须在读取 CYAN_CONFIG 之前加载，以便 .env 中的 CYAN_CONFIG 能影响 TOML 路径
     load_dotenv(".env", override=False)
-
-    # 若显式指定 CYAN_CONFIG，只读该文件；否则按优先级叠加：全局 → 项目本地
     explicit = os.environ.get("CYAN_CONFIG")
-    if explicit:
-        config_paths = [Path(explicit).expanduser()]
-    else:
-        config_paths = [
-            Path(_DEFAULT_CONFIG_PATH).expanduser(),
-            Path(".cyan/config.toml"),
-        ]
-
-    for config_path in config_paths:
-        if config_path.exists():
+    paths = (
+        [Path(explicit).expanduser()]
+        if explicit
+        else [Path(_DEFAULT_CONFIG_PATH).expanduser(), Path(".cyan/config.toml")]
+    )
+    for path in paths:
+        if path.exists():
             try:
-                with open(config_path, "rb") as f:
-                    data = tomllib.load(f)
-            except tomllib.TOMLDecodeError as e:
-                raise SystemExit(f"Config parse error ({config_path}): {e}") from e
+                data = tomllib.loads(path.read_text(encoding="utf-8"))
+            except (OSError, tomllib.TOMLDecodeError) as exc:
+                raise SystemExit(f"Config parse error ({path}): {exc}") from exc
             _apply_toml(config, data)
-
     _apply_env(config)
     if config.host not in {"127.0.0.1", "::1"}:
         raise SystemExit("Config error: core.host must be a loopback IP address")
+    if not 1 <= config.port <= 65535:
+        raise SystemExit("Config error: core.port must be between 1 and 65535")
     return config
 
 
-# 将已解析的 TOML 根表写入 config；未知小节或类型错误时退出进程
+# 将允许的 TOML 小节写入配置，旧扩展配置直接拒绝以免产生隐式行为
 def _apply_toml(config: CyanConfig, data: dict[str, Any]) -> None:
-    known_sections = {
-        "core",
-        "logging",
-        "agent",
-        "llm",
-        "trace",
-        "permission",
-        "compaction",
-        "mcp",
-        "incident",
-    }
-    unknown = set(data.keys()) - known_sections
+    known = {"core", "logging", "llm", "trace", "incident"}
+    unknown = set(data) - known
     if unknown:
         raise SystemExit(f"Unknown top-level config keys: {', '.join(sorted(unknown))}")
 
-    if "core" in data:
-        core = data["core"]
-        if not isinstance(core, dict):
-            raise SystemExit("Config error: [core] must be a table")
-        unknown_core: set[str] = set(core.keys()) - {"host", "port"}
-        if unknown_core:
-            raise SystemExit(f"Unknown [core] keys: {', '.join(sorted(unknown_core))}")
-        if "host" in core:
-            val = core["host"]
-            if not isinstance(val, str):
-                raise SystemExit("Config error: core.host must be a string")
-            config.host = val
-        if "port" in core:
-            val = core["port"]
-            if not isinstance(val, int):
-                raise SystemExit("Config error: core.port must be an integer")
-            config.port = val
+    core = data.get("core", {})
+    if not isinstance(core, dict) or set(core) - {"host", "port"}:
+        raise SystemExit("Config error: [core] accepts only host and port")
+    if "host" in core:
+        if not isinstance(core["host"], str):
+            raise SystemExit("Config error: core.host must be a string")
+        config.host = core["host"]
+    if "port" in core:
+        if not isinstance(core["port"], int):
+            raise SystemExit("Config error: core.port must be an integer")
+        config.port = core["port"]
 
-    if "logging" in data:
-        log = data["logging"]
-        if not isinstance(log, dict):
-            raise SystemExit("Config error: [logging] must be a table")
-        unknown_log: set[str] = set(log.keys()) - {"level", "file", "format"}
-        if unknown_log:
-            raise SystemExit(f"Unknown [logging] keys: {', '.join(sorted(unknown_log))}")
-        for key in ("level", "file", "format"):
-            if key in log:
-                val = log[key]
-                if not isinstance(val, str):
-                    raise SystemExit(f"Config error: logging.{key} must be a string")
-                setattr(config.logging, key, val)
+    logging_data = data.get("logging", {})
+    if not isinstance(logging_data, dict) or set(logging_data) - {"level", "file", "format"}:
+        raise SystemExit("Config error: [logging] accepts level, file and format")
+    for key in ("level", "file", "format"):
+        if key in logging_data:
+            value = logging_data[key]
+            if not isinstance(value, str):
+                raise SystemExit(f"Config error: logging.{key} must be a string")
+            setattr(config.logging, key, value)
 
-    if "agent" in data:
-        agent = data["agent"]
-        if not isinstance(agent, dict):
-            raise SystemExit("Config error: [agent] must be a table")
-        unknown_agent: set[str] = set(agent.keys()) - {"max_steps"}
-        if unknown_agent:
-            raise SystemExit(f"Unknown [agent] keys: {', '.join(sorted(unknown_agent))}")
-        if "max_steps" in agent:
-            val = agent["max_steps"]
-            if not isinstance(val, int) or val <= 0:
-                raise SystemExit("Config error: agent.max_steps must be a positive integer")
-            config.agent.max_steps = val
+    llm = data.get("llm", {})
+    if not isinstance(llm, dict) or set(llm) - {"default_model"}:
+        raise SystemExit("Config error: [llm] accepts only default_model")
+    if "default_model" in llm:
+        if not isinstance(llm["default_model"], str) or not llm["default_model"]:
+            raise SystemExit("Config error: llm.default_model must be a non-empty string")
+        config.llm.default_model = llm["default_model"]
 
-    if "llm" in data:
-        llm = data["llm"]
-        if not isinstance(llm, dict):
-            raise SystemExit("Config error: [llm] must be a table")
-        unknown_llm: set[str] = set(llm.keys()) - {"default_model", "router"}
-        if unknown_llm:
-            raise SystemExit(f"Unknown [llm] keys: {', '.join(sorted(unknown_llm))}")
-        if "default_model" in llm:
-            val = llm["default_model"]
-            if not isinstance(val, str):
-                raise SystemExit("Config error: llm.default_model must be a string")
-            config.llm.default_model = val
-        if "router" in llm:
-            val = llm["router"]
-            if not isinstance(val, str):
-                raise SystemExit("Config error: llm.router must be a string")
-            config.llm.router = val
+    trace = data.get("trace", {})
+    if not isinstance(trace, dict) or set(trace) - {"enabled", "file"}:
+        raise SystemExit("Config error: [trace] accepts enabled and file")
+    for key in ("enabled",):
+        if key in trace:
+            if not isinstance(trace[key], bool):
+                raise SystemExit(f"Config error: trace.{key} must be a boolean")
+            setattr(config.trace, key, trace[key])
+    if "file" in trace:
+        if not isinstance(trace["file"], str):
+            raise SystemExit("Config error: trace.file must be a string")
+        config.trace.file = trace["file"]
 
-    if "trace" in data:
-        trace = data["trace"]
-        if not isinstance(trace, dict):
-            raise SystemExit("Config error: [trace] must be a table")
-        unknown_trace: set[str] = set(trace.keys()) - {"enabled", "file", "include_llm_payload"}
-        if unknown_trace:
-            raise SystemExit(f"Unknown [trace] keys: {', '.join(sorted(unknown_trace))}")
-        if "enabled" in trace:
-            val = trace["enabled"]
-            if not isinstance(val, bool):
-                raise SystemExit("Config error: trace.enabled must be a boolean")
-            config.trace.enabled = val
-        if "file" in trace:
-            val = trace["file"]
-            if not isinstance(val, str):
-                raise SystemExit("Config error: trace.file must be a string")
-            config.trace.file = val
-        if "include_llm_payload" in trace:
-            val = trace["include_llm_payload"]
-            if not isinstance(val, bool):
-                raise SystemExit("Config error: trace.include_llm_payload must be a boolean")
-            config.trace.include_llm_payload = val
-
-    if "permission" in data:
-        perm = data["permission"]
-        if not isinstance(perm, dict):
-            raise SystemExit("Config error: [permission] must be a table")
-        unknown_perm: set[str] = set(perm.keys()) - {"timeout_s"}
-        if unknown_perm:
-            raise SystemExit(f"Unknown [permission] keys: {', '.join(sorted(unknown_perm))}")
-        if "timeout_s" in perm:
-            val = perm["timeout_s"]
-            if not isinstance(val, (int, float)) or val < 0:
-                raise SystemExit("Config error: permission.timeout_s must be a non-negative number")
-            config.permission.timeout_s = float(val)
-
-    if "compaction" in data:
-        comp = data["compaction"]
-        if not isinstance(comp, dict):
-            raise SystemExit("Config error: [compaction] must be a table")
-        known_compaction_keys = {
-            "auto_threshold",
-            "tool_result_limit",
-            "tool_result_keep",
-        }
-        unknown_comp: set[str] = set(comp.keys()) - known_compaction_keys
-        if unknown_comp:
-            raise SystemExit(f"Unknown [compaction] keys: {', '.join(sorted(unknown_comp))}")
-        if "auto_threshold" in comp:
-            val = comp["auto_threshold"]
-            if not isinstance(val, (int, float)) or not (0.0 <= val <= 1.0):
-                raise SystemExit("Config error: compaction.auto_threshold must be between 0 and 1")
-            config.compaction.auto_threshold = float(val)
-        if "tool_result_limit" in comp:
-            val = comp["tool_result_limit"]
-            if not isinstance(val, int) or val <= 0:
-                raise SystemExit(
-                    "Config error: compaction.tool_result_limit must be a positive integer"
-                )
-            config.compaction.tool_result_limit = val
-        if "tool_result_keep" in comp:
-            val = comp["tool_result_keep"]
-            if not isinstance(val, int) or val <= 0:
-                raise SystemExit(
-                    "Config error: compaction.tool_result_keep must be a positive integer"
-                )
-            config.compaction.tool_result_keep = val
-
-    if "mcp" in data:
-        mcp = data["mcp"]
-        if not isinstance(mcp, dict):
-            raise SystemExit("Config error: [mcp] must be a table")
-        unknown_mcp: set[str] = set(mcp.keys()) - {"servers"}
-        if unknown_mcp:
-            raise SystemExit(f"Unknown [mcp] keys: {', '.join(sorted(unknown_mcp))}")
-        servers_raw = mcp.get("servers", [])
-        if not isinstance(servers_raw, list):
-            raise SystemExit("Config error: mcp.servers must be an array of tables")
-        for i, srv in enumerate(servers_raw):
-            if not isinstance(srv, dict):
-                raise SystemExit(f"Config error: mcp.servers[{i}] must be a table")
-            name = srv.get("name")
-            if not isinstance(name, str) or not name:
-                raise SystemExit(f"Config error: mcp.servers[{i}].name must be a non-empty string")
-            transport = srv.get("transport", "stdio")
-            if transport not in ("stdio", "tcp"):
-                raise SystemExit(
-                    f"Config error: mcp.servers[{i}].transport must be 'stdio' or 'tcp'"
-                )
-            s = McpServerConfig(name=name, transport=transport)
-            if "command" in srv:
-                val = srv["command"]
-                if not isinstance(val, str):
-                    raise SystemExit(f"Config error: mcp.servers[{i}].command must be a string")
-                s.command = val
-            if "args" in srv:
-                val = srv["args"]
-                if not isinstance(val, list):
-                    raise SystemExit(f"Config error: mcp.servers[{i}].args must be an array")
-                s.args = [str(a) for a in val]
-            if "env" in srv:
-                val = srv["env"]
-                if not isinstance(val, dict):
-                    raise SystemExit(f"Config error: mcp.servers[{i}].env must be a table")
-                s.env = {str(k): str(v) for k, v in val.items()}
-            if "host" in srv:
-                val = srv["host"]
-                if not isinstance(val, str):
-                    raise SystemExit(f"Config error: mcp.servers[{i}].host must be a string")
-                s.host = val
-            if "port" in srv:
-                val = srv["port"]
-                if not isinstance(val, int):
-                    raise SystemExit(f"Config error: mcp.servers[{i}].port must be an integer")
-                s.port = val
-            config.mcp.servers.append(s)
-
-    if "incident" in data:
-        incident = data["incident"]
-        if not isinstance(incident, dict):
-            raise SystemExit("Config error: [incident] must be a table")
-        unknown_incident = set(incident) - {"smoke"}
-        if unknown_incident:
-            raise SystemExit(
-                f"Unknown [incident] keys: {', '.join(sorted(unknown_incident))}"
-            )
+    incident = data.get("incident", {})
+    if not isinstance(incident, dict) or set(incident) - {"smoke"}:
+        raise SystemExit("Config error: [incident] accepts only smoke")
 
 
-# 用 CYAN_* 环境变量覆盖 config 中对应字段（若变量已设置）
+# 用当前支持的 CYAN_* 变量覆盖配置，删除旧 Agent 扩展变量
 def _apply_env(config: CyanConfig) -> None:
-    host = os.environ.get("CYAN_HOST")
-    if host is not None:
-        config.host = host
-
-    port_str = os.environ.get("CYAN_PORT")
-    if port_str is not None:
+    if (value := os.environ.get("CYAN_HOST")) is not None:
+        config.host = value
+    if (value := os.environ.get("CYAN_PORT")) is not None:
         try:
-            config.port = int(port_str)
-        except ValueError:
-            raise SystemExit(f"Config error: CYAN_PORT must be an integer, got: {port_str!r}")
-
-    log_level = os.environ.get("CYAN_LOG_LEVEL")
-    if log_level is not None:
-        config.logging.level = log_level
-
-    log_file = os.environ.get("CYAN_LOG_FILE")
-    if log_file is not None:
-        config.logging.file = log_file
-
-    log_format = os.environ.get("CYAN_LOG_FORMAT")
-    if log_format is not None:
-        config.logging.format = log_format
-
-    max_steps_str = os.environ.get("CYAN_MAX_STEPS")
-    if max_steps_str is not None:
-        try:
-            val = int(max_steps_str)
-            if val <= 0:
-                raise SystemExit(
-                    "Config error: CYAN_MAX_STEPS must be a positive integer,"
-                    f" got: {max_steps_str!r}"
-                )
-            config.agent.max_steps = val
-        except ValueError:
-            raise SystemExit(
-                f"Config error: CYAN_MAX_STEPS must be an integer, got: {max_steps_str!r}"
-            )
-
-    default_model = os.environ.get("CYAN_LLM_DEFAULT_MODEL")
-    if default_model is not None:
-        config.llm.default_model = default_model
-
-    trace_enabled = os.environ.get("CYAN_TRACE_ENABLED")
-    if trace_enabled is not None:
-        config.trace.enabled = trace_enabled.lower() not in ("0", "false", "no")
-
-    trace_file = os.environ.get("CYAN_TRACE_FILE")
-    if trace_file is not None:
-        config.trace.file = trace_file
-
-    trace_payload = os.environ.get("CYAN_TRACE_INCLUDE_LLM_PAYLOAD")
-    if trace_payload is not None:
-        config.trace.include_llm_payload = trace_payload.lower() not in ("0", "false", "no")
-
-    perm_timeout = os.environ.get("CYAN_PERMISSION_TIMEOUT_S")
-    if perm_timeout is not None:
-        try:
-            perm_timeout_val = float(perm_timeout)
-            if perm_timeout_val < 0:
-                raise SystemExit(
-                    f"Config error: CYAN_PERMISSION_TIMEOUT_S must be >= 0, got: {perm_timeout!r}"
-                )
-            config.permission.timeout_s = perm_timeout_val
-        except ValueError:
-            raise SystemExit(
-                f"Config error: CYAN_PERMISSION_TIMEOUT_S must be a number, got: {perm_timeout!r}"
-            )
-
-    compact_threshold = os.environ.get("CYAN_COMPACT_THRESHOLD")
-    if compact_threshold is not None:
-        try:
-            compact_threshold_val = float(compact_threshold)
-            if not (0.0 <= compact_threshold_val <= 1.0):
-                raise SystemExit(
-                    "Config error: CYAN_COMPACT_THRESHOLD must be between 0 and 1, "
-                    f"got: {compact_threshold!r}"
-                )
-            config.compaction.auto_threshold = compact_threshold_val
-        except ValueError:
-            raise SystemExit(
-                f"Config error: CYAN_COMPACT_THRESHOLD must be a number, got: {compact_threshold!r}"
-            )
-
-    compact_tool_limit = os.environ.get("CYAN_COMPACT_TOOL_LIMIT")
-    if compact_tool_limit is not None:
-        try:
-            compact_tool_limit_val = int(compact_tool_limit)
-            if compact_tool_limit_val <= 0:
-                raise SystemExit(
-                    "Config error: CYAN_COMPACT_TOOL_LIMIT must be a positive integer, "
-                    f"got: {compact_tool_limit!r}"
-                )
-            config.compaction.tool_result_limit = compact_tool_limit_val
-        except ValueError:
-            raise SystemExit(
-                "Config error: CYAN_COMPACT_TOOL_LIMIT must be an integer, "
-                f"got: {compact_tool_limit!r}"
-            )
-
-    compact_tool_keep = os.environ.get("CYAN_COMPACT_TOOL_KEEP")
-    if compact_tool_keep is not None:
-        try:
-            compact_tool_keep_val = int(compact_tool_keep)
-            if compact_tool_keep_val <= 0:
-                raise SystemExit(
-                    "Config error: CYAN_COMPACT_TOOL_KEEP must be a positive integer, "
-                    f"got: {compact_tool_keep!r}"
-                )
-            config.compaction.tool_result_keep = compact_tool_keep_val
-        except ValueError:
-            raise SystemExit(
-                "Config error: CYAN_COMPACT_TOOL_KEEP must be an integer, "
-                f"got: {compact_tool_keep!r}"
-            )
+            config.port = int(value)
+        except ValueError as exc:
+            raise SystemExit(f"Config error: CYAN_PORT must be an integer, got: {value!r}") from exc
+    for env_name, attr in (
+        ("CYAN_LOG_LEVEL", "level"),
+        ("CYAN_LOG_FILE", "file"),
+        ("CYAN_LOG_FORMAT", "format"),
+    ):
+        if (value := os.environ.get(env_name)) is not None:
+            setattr(config.logging, attr, value)
+    if (value := os.environ.get("CYAN_LLM_DEFAULT_MODEL")) is not None:
+        config.llm.default_model = value
+    if (value := os.environ.get("CYAN_TRACE_ENABLED")) is not None:
+        config.trace.enabled = value.lower() not in {"0", "false", "no"}
+    if (value := os.environ.get("CYAN_TRACE_FILE")) is not None:
+        config.trace.file = value

@@ -5,40 +5,12 @@
 ## Transport
 
 - TCP loopback `127.0.0.1:7437` (`CYAN_HOST` / `CYAN_PORT` override it).
+- Wire protocol version: `2`.
 - Each frame is one newline-terminated JSON object (NDJSON).
 - Commands use JSON-RPC 2.0; server pushes use `kind=event`.
 - `event.subscribe` supports `global`, `run:<id>`, and `job:<id>` scopes.
 
 ## Commands
-
-### AgentRunCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `goal` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "agent.run",
-      "default": "agent.run",
-      "title": "Type",
-      "type": "string"
-    },
-    "goal": {
-      "title": "Goal",
-      "type": "string"
-    }
-  },
-  "required": [
-    "goal"
-  ],
-  "title": "AgentRunCommand",
-  "type": "object"
-}
-```
 
 ### CoreShutdownCommand
 
@@ -180,6 +152,43 @@
     "decision"
   ],
   "title": "IncidentDecideCommand",
+  "type": "object"
+}
+```
+
+### IncidentFollowUpCommand
+
+| Field | Type | Required |
+|---|---|---|
+| `type` | `string` | no |
+| `incident_id` | `string` | yes |
+| `content` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "type": {
+      "const": "incident.follow_up",
+      "default": "incident.follow_up",
+      "title": "Type",
+      "type": "string"
+    },
+    "incident_id": {
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "content": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    }
+  },
+  "required": [
+    "incident_id",
+    "content"
+  ],
+  "title": "IncidentFollowUpCommand",
   "type": "object"
 }
 ```
@@ -507,47 +516,13 @@
 }
 ```
 
-### PermissionRespondCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `tool_use_id` | `string` | yes |
-| `decision` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "permission.respond",
-      "default": "permission.respond",
-      "title": "Type",
-      "type": "string"
-    },
-    "tool_use_id": {
-      "title": "Tool Use Id",
-      "type": "string"
-    },
-    "decision": {
-      "title": "Decision",
-      "type": "string"
-    }
-  },
-  "required": [
-    "tool_use_id",
-    "decision"
-  ],
-  "title": "PermissionRespondCommand",
-  "type": "object"
-}
-```
-
 ### PingCommand
 
 | Field | Type | Required |
 |---|---|---|
 | `type` | `string` | no |
 | `client` | `string` | yes |
+| `protocol_version` | `integer | null` | no |
 
 ```json
 {
@@ -561,6 +536,18 @@
     "client": {
       "title": "Client",
       "type": "string"
+    },
+    "protocol_version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Protocol Version"
     }
   },
   "required": [
@@ -571,201 +558,7 @@
 }
 ```
 
-### SessionCloseCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.close",
-      "default": "session.close",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id"
-  ],
-  "title": "SessionCloseCommand",
-  "type": "object"
-}
-```
-
-### SessionCompactCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `focus` | `string` | no |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.compact",
-      "default": "session.compact",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "focus": {
-      "default": "",
-      "title": "Focus",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id"
-  ],
-  "title": "SessionCompactCommand",
-  "type": "object"
-}
-```
-
-### SessionCreateCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `mode` | `string` | no |
-| `title` | `string` | no |
-| `workspace_root` | `string` | no |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.create",
-      "default": "session.create",
-      "title": "Type",
-      "type": "string"
-    },
-    "mode": {
-      "default": "chat",
-      "enum": [
-        "one_shot",
-        "chat",
-        "incident"
-      ],
-      "title": "Mode",
-      "type": "string"
-    },
-    "title": {
-      "default": "",
-      "title": "Title",
-      "type": "string"
-    },
-    "workspace_root": {
-      "default": "",
-      "title": "Workspace Root",
-      "type": "string"
-    }
-  },
-  "title": "SessionCreateCommand",
-  "type": "object"
-}
-```
-
-### SessionGetHistoryCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.get_history",
-      "default": "session.get_history",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id"
-  ],
-  "title": "SessionGetHistoryCommand",
-  "type": "object"
-}
-```
-
-### SessionSendMessageCommand
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `content` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.send_message",
-      "default": "session.send_message",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "content": {
-      "title": "Content",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "content"
-  ],
-  "title": "SessionSendMessageCommand",
-  "type": "object"
-}
-```
-
 ## Results
-
-### AgentRunResult
-
-| Field | Type | Required |
-|---|---|---|
-| `run_id` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id"
-  ],
-  "title": "AgentRunResult",
-  "type": "object"
-}
-```
 
 ### CoreShutdownResult
 
@@ -834,6 +627,28 @@
     "status"
   ],
   "title": "IncidentDecideResult",
+  "type": "object"
+}
+```
+
+### IncidentFollowUpResult
+
+| Field | Type | Required |
+|---|---|---|
+| `run_id` | `string` | yes |
+
+```json
+{
+  "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id"
+  ],
+  "title": "IncidentFollowUpResult",
   "type": "object"
 }
 ```
@@ -1240,26 +1055,6 @@
 }
 ```
 
-### PermissionRespondResult
-
-| Field | Type | Required |
-|---|---|---|
-| `ok` | `boolean` | no |
-
-```json
-{
-  "properties": {
-    "ok": {
-      "default": true,
-      "title": "Ok",
-      "type": "boolean"
-    }
-  },
-  "title": "PermissionRespondResult",
-  "type": "object"
-}
-```
-
 ### PongResult
 
 | Field | Type | Required |
@@ -1306,142 +1101,6 @@
 }
 ```
 
-### SessionCloseResult
-
-| Field | Type | Required |
-|---|---|---|
-| `status` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "status": {
-      "enum": [
-        "active",
-        "waiting_for_input",
-        "closed"
-      ],
-      "title": "Status",
-      "type": "string"
-    }
-  },
-  "required": [
-    "status"
-  ],
-  "title": "SessionCloseResult",
-  "type": "object"
-}
-```
-
-### SessionCompactResult
-
-| Field | Type | Required |
-|---|---|---|
-| `summary_tokens` | `integer` | yes |
-| `saved_tokens` | `integer` | yes |
-
-```json
-{
-  "properties": {
-    "summary_tokens": {
-      "title": "Summary Tokens",
-      "type": "integer"
-    },
-    "saved_tokens": {
-      "title": "Saved Tokens",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "summary_tokens",
-    "saved_tokens"
-  ],
-  "title": "SessionCompactResult",
-  "type": "object"
-}
-```
-
-### SessionCreateResult
-
-| Field | Type | Required |
-|---|---|---|
-| `session_id` | `string` | yes |
-| `status` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "status": {
-      "enum": [
-        "active",
-        "waiting_for_input",
-        "closed"
-      ],
-      "title": "Status",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "status"
-  ],
-  "title": "SessionCreateResult",
-  "type": "object"
-}
-```
-
-### SessionGetHistoryResult
-
-| Field | Type | Required |
-|---|---|---|
-| `messages` | `array` | yes |
-
-```json
-{
-  "properties": {
-    "messages": {
-      "items": {
-        "additionalProperties": true,
-        "type": "object"
-      },
-      "title": "Messages",
-      "type": "array"
-    }
-  },
-  "required": [
-    "messages"
-  ],
-  "title": "SessionGetHistoryResult",
-  "type": "object"
-}
-```
-
-### SessionSendMessageResult
-
-| Field | Type | Required |
-|---|---|---|
-| `run_id` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id"
-  ],
-  "title": "SessionSendMessageResult",
-  "type": "object"
-}
-```
-
 ## Event envelope
 
 ### EventPushEnvelope
@@ -1475,59 +1134,6 @@
 ```
 
 ## Events
-
-### ContextCompactedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `run_id` | `string` | yes |
-| `original_tokens` | `integer` | yes |
-| `summary_tokens` | `integer` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "context.compacted",
-      "default": "context.compacted",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "original_tokens": {
-      "title": "Original Tokens",
-      "type": "integer"
-    },
-    "summary_tokens": {
-      "title": "Summary Tokens",
-      "type": "integer"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "run_id",
-    "original_tokens",
-    "summary_tokens",
-    "ts"
-  ],
-  "title": "ContextCompactedEvent",
-  "type": "object"
-}
-```
 
 ### CoreStartedEvent
 
@@ -1572,7 +1178,6 @@
 | `job_id` | `string` | yes |
 | `incident_id` | `string` | yes |
 | `attempt_id` | `string` | yes |
-| `session_id` | `string | null` | no |
 | `run_id` | `string | null` | no |
 | `ts` | `string` | yes |
 
@@ -1596,18 +1201,6 @@
     "attempt_id": {
       "title": "Attempt Id",
       "type": "string"
-    },
-    "session_id": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Session Id"
     },
     "run_id": {
       "anyOf": [
@@ -1978,59 +1571,6 @@
 }
 ```
 
-### LogLineEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `level` | `string` | yes |
-| `source` | `string` | yes |
-| `message` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "log.line",
-      "default": "log.line",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "level": {
-      "title": "Level",
-      "type": "string"
-    },
-    "source": {
-      "title": "Source",
-      "type": "string"
-    },
-    "message": {
-      "title": "Message",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "level",
-    "source",
-    "message",
-    "ts"
-  ],
-  "title": "LogLineEvent",
-  "type": "object"
-}
-```
-
 ### PatchProposedEvent
 
 | Field | Type | Required |
@@ -2080,166 +1620,6 @@
     "ts"
   ],
   "title": "PatchProposedEvent",
-  "type": "object"
-}
-```
-
-### PermissionDeniedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `tool_use_id` | `string` | yes |
-| `decision` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "permission.denied",
-      "default": "permission.denied",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "tool_use_id": {
-      "title": "Tool Use Id",
-      "type": "string"
-    },
-    "decision": {
-      "title": "Decision",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "tool_use_id",
-    "decision",
-    "ts"
-  ],
-  "title": "PermissionDeniedEvent",
-  "type": "object"
-}
-```
-
-### PermissionGrantedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `tool_use_id` | `string` | yes |
-| `decision` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "permission.granted",
-      "default": "permission.granted",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "tool_use_id": {
-      "title": "Tool Use Id",
-      "type": "string"
-    },
-    "decision": {
-      "title": "Decision",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "tool_use_id",
-    "decision",
-    "ts"
-  ],
-  "title": "PermissionGrantedEvent",
-  "type": "object"
-}
-```
-
-### PermissionRequestedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `tool_use_id` | `string` | yes |
-| `tool_name` | `string` | yes |
-| `params` | `object` | yes |
-| `param_preview` | `string` | yes |
-| `session_id` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "permission.requested",
-      "default": "permission.requested",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "tool_use_id": {
-      "title": "Tool Use Id",
-      "type": "string"
-    },
-    "tool_name": {
-      "title": "Tool Name",
-      "type": "string"
-    },
-    "params": {
-      "additionalProperties": true,
-      "title": "Params",
-      "type": "object"
-    },
-    "param_preview": {
-      "title": "Param Preview",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "tool_use_id",
-    "tool_name",
-    "params",
-    "param_preview",
-    "session_id",
-    "ts"
-  ],
-  "title": "PermissionRequestedEvent",
   "type": "object"
 }
 ```
@@ -2341,246 +1721,6 @@
     "ts"
   ],
   "title": "RunStartedEvent",
-  "type": "object"
-}
-```
-
-### SessionClosedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.closed",
-      "default": "session.closed",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "ts"
-  ],
-  "title": "SessionClosedEvent",
-  "type": "object"
-}
-```
-
-### SessionCreatedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `mode` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.created",
-      "default": "session.created",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "mode": {
-      "title": "Mode",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "mode",
-    "ts"
-  ],
-  "title": "SessionCreatedEvent",
-  "type": "object"
-}
-```
-
-### SessionMessageReceivedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `content` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.message_received",
-      "default": "session.message_received",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "content": {
-      "title": "Content",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "content",
-    "ts"
-  ],
-  "title": "SessionMessageReceivedEvent",
-  "type": "object"
-}
-```
-
-### SessionResumedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.resumed",
-      "default": "session.resumed",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "ts"
-  ],
-  "title": "SessionResumedEvent",
-  "type": "object"
-}
-```
-
-### SessionWaitingForInputEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `session_id` | `string` | yes |
-| `last_run_id` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "session.waiting_for_input",
-      "default": "session.waiting_for_input",
-      "title": "Type",
-      "type": "string"
-    },
-    "session_id": {
-      "title": "Session Id",
-      "type": "string"
-    },
-    "last_run_id": {
-      "title": "Last Run Id",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "session_id",
-    "last_run_id",
-    "ts"
-  ],
-  "title": "SessionWaitingForInputEvent",
-  "type": "object"
-}
-```
-
-### SkillInvokedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `skill_name` | `string` | yes |
-| `arguments` | `string` | yes |
-| `run_id` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "skill.invoked",
-      "default": "skill.invoked",
-      "title": "Type",
-      "type": "string"
-    },
-    "skill_name": {
-      "title": "Skill Name",
-      "type": "string"
-    },
-    "arguments": {
-      "title": "Arguments",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "skill_name",
-    "arguments",
-    "run_id",
-    "ts"
-  ],
-  "title": "SkillInvokedEvent",
   "type": "object"
 }
 ```
@@ -2723,100 +1863,6 @@
     "ts"
   ],
   "title": "StepStartedEvent",
-  "type": "object"
-}
-```
-
-### SubagentFinishedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `parent_run_id` | `string` | yes |
-| `status` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "subagent.finished",
-      "default": "subagent.finished",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "parent_run_id": {
-      "title": "Parent Run Id",
-      "type": "string"
-    },
-    "status": {
-      "title": "Status",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "parent_run_id",
-    "status",
-    "ts"
-  ],
-  "title": "SubagentFinishedEvent",
-  "type": "object"
-}
-```
-
-### SubagentStartedEvent
-
-| Field | Type | Required |
-|---|---|---|
-| `type` | `string` | no |
-| `run_id` | `string` | yes |
-| `parent_run_id` | `string` | yes |
-| `description` | `string` | yes |
-| `ts` | `string` | yes |
-
-```json
-{
-  "properties": {
-    "type": {
-      "const": "subagent.started",
-      "default": "subagent.started",
-      "title": "Type",
-      "type": "string"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "parent_run_id": {
-      "title": "Parent Run Id",
-      "type": "string"
-    },
-    "description": {
-      "title": "Description",
-      "type": "string"
-    },
-    "ts": {
-      "title": "Ts",
-      "type": "string"
-    }
-  },
-  "required": [
-    "run_id",
-    "parent_run_id",
-    "description",
-    "ts"
-  ],
-  "title": "SubagentStartedEvent",
   "type": "object"
 }
 ```
@@ -3014,9 +2060,8 @@
 | `-32601` | Method not found |
 | `-32602` | Invalid params |
 | `-32603` | Internal error |
-| `-32010` | Session not found |
-| `-32011` | Session closed |
-| `-32012` | Session busy |
 | `-32030` | Job not found |
 | `-32031` | Incident decision failed |
 | `-32032` | Core is shutting down |
+| `-32033` | Incident review failed |
+| `-32034` | Wire protocol is incompatible |

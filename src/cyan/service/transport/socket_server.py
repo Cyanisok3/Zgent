@@ -44,10 +44,9 @@ def _trace_params(method: str, params: dict[str, Any]) -> dict[str, Any]:
         env = safe.get("env")
         safe["env"] = {"forwarded_keys": sorted(env) if isinstance(env, dict) else []}
     text_field = {
-        "agent.run": "goal",
-        "session.send_message": "content",
         "launch.preview": "command",
         "launch.start": "command",
+        "incident.follow_up": "content",
     }.get(method)
     if text_field is not None and text_field in safe:
         content = str(safe.pop(text_field))
@@ -114,7 +113,7 @@ def _trace_job_view(view: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
-# 按 RPC 方法生成不复制日志、补丁或 session 工具输出的响应摘要
+# 按 RPC 方法生成不复制日志、补丁或工具输出的响应摘要
 def _trace_result(method: str | None, result: Any) -> Any:
     if not isinstance(result, dict):
         return result
@@ -137,14 +136,6 @@ def _trace_result(method: str | None, result: Any) -> Any:
             else []
         )
         return {"jobs": safe_jobs}
-    if method == "session.get_history":
-        messages = result.get("messages")
-        roles = (
-            [str(item.get("role", "")) for item in messages if isinstance(item, dict)]
-            if isinstance(messages, list)
-            else []
-        )
-        return {"message_count": len(roles), "roles": roles}
     if method == "launch.preview":
         overrides = result.get("env_overrides")
         return {
@@ -193,7 +184,7 @@ def _trace_response(method: str | None, msg: BaseModel) -> dict[str, Any]:
 def get_connection_writer() -> asyncio.StreamWriter:
     return _writer_var.get()
 
-_MAX_LINE_BYTES = 64 * 1024 * 1024  # 64 MB per frame，兼容 MCP 大文件工具结果
+_MAX_LINE_BYTES = 64 * 1024 * 1024  # 64 MB per frame，容纳有界 IPC 响应
 
 
 class SocketServer:
@@ -302,8 +293,7 @@ class SocketServer:
             if not line:
                 return
 
-            # 每条命令独立作为 task 执行，避免长时间运行的 handler（如 session.send_message）
-            # 阻塞读循环，使 permission.respond 等并发命令能被及时处理
+            # 每条命令独立作为 task 执行，避免长时间运行的 handler 阻塞读循环
             asyncio.create_task(self._handle_line(line, writer))
 
     # 解析单行 JSON-RPC 请求并调用对应 handler，将结果或错误写回客户端

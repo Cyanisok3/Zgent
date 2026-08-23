@@ -4,14 +4,29 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Discriminator, Field
 
-from cyan.agent.session.model import SessionMode, SessionStatus
+WIRE_PROTOCOL_VERSION = 2
 
-WIRE_PROTOCOL_VERSION = 1
+COMMAND_TYPES = (
+    "core.ping",
+    "core.shutdown",
+    "event.subscribe",
+    "launch.preview",
+    "launch.start",
+    "job.start",
+    "job.list",
+    "job.get",
+    "job.cancel",
+    "job.read_log",
+    "incident.decide",
+    "incident.review",
+    "incident.follow_up",
+)
 
 
 class PingCommand(BaseModel):
     type: Literal["core.ping"] = "core.ping"
     client: str
+    protocol_version: int | None = None
 
 
 class PongResult(BaseModel):
@@ -19,7 +34,7 @@ class PongResult(BaseModel):
     protocol_version: int
     startup_workspace_root: str
     uptime_ms: int
-    received_at: str  # ISO 8601
+    received_at: str
 
 
 class CoreShutdownCommand(BaseModel):
@@ -30,99 +45,17 @@ class CoreShutdownResult(BaseModel):
     status: Literal["stopping"] = "stopping"
 
 
-class AgentRunCommand(BaseModel):
-    type: Literal["agent.run"] = "agent.run"
-    goal: str
-
-
-class AgentRunResult(BaseModel):
-    run_id: str
-
-
 class EventSubscribeCommand(BaseModel):
     type: Literal["event.subscribe"] = "event.subscribe"
-    topics: list[str]          # fnmatch 模式，如 ["step.*", "tool.*"]
-    scope: str = "global"      # "global" | "run:<run_id>" | "job:<job_id>"
-    replay_from_run: str | None = None  # 设置则先从 events.jsonl 回放历史再接实时流
+    topics: list[str]
+    scope: str = "global"
+    replay_from_run: str | None = None
     after_seq: int = Field(default=0, ge=0)
 
 
 class EventSubscribeResult(BaseModel):
     subscription_id: str
     replayed_count: int = 0
-
-
-class SessionCreateCommand(BaseModel):
-    type: Literal["session.create"] = "session.create"
-    mode: SessionMode = "chat"
-    title: str = ""
-    workspace_root: str = ""
-
-
-class SessionCreateResult(BaseModel):
-    session_id: str
-    status: SessionStatus
-
-
-class SessionSendMessageCommand(BaseModel):
-    type: Literal["session.send_message"] = "session.send_message"
-    session_id: str
-    content: str
-
-
-class SessionSendMessageResult(BaseModel):
-    run_id: str
-
-
-class SessionGetHistoryCommand(BaseModel):
-    type: Literal["session.get_history"] = "session.get_history"
-    session_id: str
-
-
-class SessionGetHistoryResult(BaseModel):
-    messages: list[dict[str, Any]]
-
-
-class SessionCloseCommand(BaseModel):
-    type: Literal["session.close"] = "session.close"
-    session_id: str
-
-
-class SessionCloseResult(BaseModel):
-    status: SessionStatus
-
-
-class PermissionRespondCommand(BaseModel):
-    type: Literal["permission.respond"] = "permission.respond"
-    tool_use_id: str
-    # "allow_once" | "always_allow" | "deny_once" | "always_deny"
-    decision: str
-
-
-class PermissionRespondResult(BaseModel):
-    ok: bool = True
-
-
-class SessionCompactCommand(BaseModel):
-    type: Literal["session.compact"] = "session.compact"
-    session_id: str
-    focus: str = ""
-
-
-class SessionCompactResult(BaseModel):
-    summary_tokens: int
-    saved_tokens: int
-
-
-class JobStartCommand(BaseModel):
-    type: Literal["job.start"] = "job.start"
-    argv: list[str]
-    workspace_root: str
-    env: dict[str, str] = Field(default_factory=dict)
-
-
-class JobStartResult(BaseModel):
-    job_id: str
 
 
 class LaunchPreviewCommand(BaseModel):
@@ -153,6 +86,17 @@ class LaunchStartResult(BaseModel):
     job_id: str
 
 
+class JobStartCommand(BaseModel):
+    type: Literal["job.start"] = "job.start"
+    argv: list[str]
+    workspace_root: str
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class JobStartResult(BaseModel):
+    job_id: str
+
+
 class JobListCommand(BaseModel):
     type: Literal["job.list"] = "job.list"
 
@@ -176,10 +120,7 @@ class JobGetResult(BaseModel):
     proposal: dict[str, Any] | None = None
     patch: str | None = None
     smoke_config: dict[str, Any] | None = None
-    smoke_config_fingerprint: str | None = Field(
-        default=None,
-        pattern=r"^[0-9a-f]{64}$",
-    )
+    smoke_config_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     smoke: dict[str, Any] | None = None
     can_apply: bool = False
     smoke_config_error: str | None = None
@@ -216,10 +157,7 @@ class IncidentDecideCommand(BaseModel):
     proposal_id: str
     decision: Literal["approve", "reject"]
     run_smoke: bool = True
-    smoke_config_fingerprint: str | None = Field(
-        default=None,
-        pattern=r"^[0-9a-f]{64}$",
-    )
+    smoke_config_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class IncidentDecideResult(BaseModel):
@@ -240,26 +178,30 @@ class IncidentReviewResult(BaseModel):
     after_text: str
 
 
-# 根据 type 字段决定命令类型的判别联合
+class IncidentFollowUpCommand(BaseModel):
+    type: Literal["incident.follow_up"] = "incident.follow_up"
+    incident_id: str
+    content: str = Field(min_length=1, max_length=64 * 1024)
+
+
+class IncidentFollowUpResult(BaseModel):
+    run_id: str
+
+
+# 根据 type 字段决定当前 v2 命令类型
 Command = Annotated[
     PingCommand
     | CoreShutdownCommand
-    | AgentRunCommand
     | EventSubscribeCommand
-    | SessionCreateCommand
-    | SessionSendMessageCommand
-    | SessionGetHistoryCommand
-    | SessionCloseCommand
-    | PermissionRespondCommand
-    | SessionCompactCommand
-    | JobStartCommand
     | LaunchPreviewCommand
     | LaunchStartCommand
+    | JobStartCommand
     | JobListCommand
     | JobGetCommand
     | JobCancelCommand
     | JobReadLogCommand
     | IncidentDecideCommand
-    | IncidentReviewCommand,
+    | IncidentReviewCommand
+    | IncidentFollowUpCommand,
     Discriminator("type"),
 ]

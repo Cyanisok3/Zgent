@@ -16,7 +16,7 @@ async def test_ping_returns_pong(
         "jsonrpc": "2.0",
         "id": "test-1",
         "method": "core.ping",
-        "params": {"client": "test/0.0.1"},
+        "params": {"client": "test/0.0.1", "protocol_version": 2},
     }
     writer.write((json.dumps(req) + "\n").encode())
     await writer.drain()
@@ -30,10 +30,34 @@ async def test_ping_returns_pong(
     assert resp["id"] == "test-1"
     assert "result" in resp
     assert resp["result"]["server_version"] == "0.0.1"
-    assert resp["result"]["protocol_version"] == 1
+    assert resp["result"]["protocol_version"] == 2
     assert resp["result"]["startup_workspace_root"]
     assert resp["result"]["uptime_ms"] >= 0
     assert "received_at" in resp["result"]
+
+
+# 功能：验证旧客户端通过 core.ping 得到明确的协议不兼容错误
+# 设计：真实 TCP 请求传入 v1，检查 daemon 不静默降级到旧命令表
+async def test_ping_rejects_old_protocol(
+    running_daemon: subprocess.Popen[bytes],
+    free_port: int,
+) -> None:
+    del running_daemon
+    reader, writer = await asyncio.open_connection("127.0.0.1", free_port)
+    request = {
+        "jsonrpc": "2.0",
+        "id": "old-1",
+        "method": "core.ping",
+        "params": {"client": "old/0.0.1", "protocol_version": 1},
+    }
+    writer.write((json.dumps(request) + "\n").encode())
+    await writer.drain()
+    response = json.loads(await asyncio.wait_for(reader.readline(), timeout=5.0))
+    writer.close()
+    await writer.wait_closed()
+
+    assert response["error"]["code"] == -32034
+    assert "protocol version" in response["error"]["message"]
 
 
 # 功能：验证调用未注册方法时 daemon 返回 METHOD_NOT_FOUND 错误码（-32601）

@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from cyan.training.incidents.models import Incident
 from cyan.training.incidents.patch import PatchService, sha256_bytes
 from cyan.training.incidents.store import IncidentStore
 from cyan.training.incidents.tools import ProposePatchTool, SubmitDiagnosisTool
@@ -28,6 +30,22 @@ def _workspace_evidence(
     }
 
 
+# 为新合并存储写入最小合法 Incident 快照
+def _seed_incident(store: IncidentStore, workspace: Path) -> None:
+    now = datetime.now(UTC)
+    store.write_incident(
+        Incident(
+            id="incident-1",
+            job_id="job-1",
+            attempt_id="attempt-1",
+            workspace_root=str(workspace.resolve()),
+            failure_path="attempts/attempt-1/failure.json",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
 # 调用结构化替换工具并默认引用目标文件首行
 async def _propose(
     tool: ProposePatchTool,
@@ -38,6 +56,7 @@ async def _propose(
     replace: str,
     evidence: list[dict[str, str]] | None = None,
 ) -> object:
+    _seed_incident(tool._store, target.parent)
     try:
         tool._store.read_diagnosis(tool._incident_id)
     except FileNotFoundError:
@@ -64,6 +83,7 @@ async def _propose(
 # 设计：通过真实 store 往返并比较关键字段，覆盖工具模型和 artifact 文件边界
 async def test_submit_diagnosis_writes_typed_artifact(tmp_path: Path) -> None:
     store = IncidentStore(tmp_path / "incidents")
+    _seed_incident(store, tmp_path)
     tool = SubmitDiagnosisTool(store, "incident-1")
 
     result = await tool.invoke(
@@ -93,6 +113,7 @@ async def test_submit_diagnosis_writes_typed_artifact(tmp_path: Path) -> None:
 # 设计：注入只接受单一 byte range 的 validator，提交另一范围并断言零 artifact 写入
 async def test_submit_diagnosis_rejects_unobserved_evidence(tmp_path: Path) -> None:
     store = IncidentStore(tmp_path / "incidents")
+    _seed_incident(store, tmp_path)
     observed = {("stderr", "bytes 120:180")}
 
     # 根据测试中的已观察登记表返回具体校验错误

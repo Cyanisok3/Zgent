@@ -76,6 +76,7 @@ def test_core_start_json_output(monkeypatch, capsys) -> None:
     assert payload["host"] == "127.0.0.1"
     assert payload["port"] == 7437
     assert payload["pid"] == 12345
+    assert payload["protocol_version"] == 2
 
 
 # 功能：验证 JSON 启动命令能发现由另一工作区配置启动的活动 daemon
@@ -96,7 +97,7 @@ def test_core_start_json_reports_discovered_workspace(monkeypatch, capsys) -> No
                 "port": 8123,
                 "workspace_root": "/tmp/other-project",
                 "pid": 456,
-                "protocol_version": 1,
+                "protocol_version": 2,
             }
         ),
     )
@@ -108,7 +109,7 @@ def test_core_start_json_reports_discovered_workspace(monkeypatch, capsys) -> No
     assert payload["status"] == "already_running"
     assert payload["port"] == 8123
     assert payload["workspace_root"] == "/tmp/other-project"
-    assert payload["protocol_version"] == 1
+    assert payload["protocol_version"] == 2
     popen.assert_not_called()
 
 

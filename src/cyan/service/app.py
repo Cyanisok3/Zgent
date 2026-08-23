@@ -10,8 +10,6 @@ import os
 import secrets
 import signal
 import time
-from collections.abc import Coroutine
-from datetime import UTC
 from pathlib import Path
 from typing import IO, Any, cast
 
@@ -19,13 +17,6 @@ from pydantic import BaseModel
 
 import cyan
 from cyan.agent.events.bus import EventBus
-from cyan.agent.llm.provider import AnthropicProvider
-from cyan.agent.mcp.server import McpServerManager
-from cyan.agent.permissions.manager import PermissionManager
-from cyan.agent.permissions.storage import load_policy_file
-from cyan.agent.runner import AgentRunner, RunProfile
-from cyan.agent.runs import events_file, new_run_id
-from cyan.agent.session import Session, SessionManager, SessionStore
 from cyan.agent.trace.record import TraceRecord
 from cyan.agent.trace.writer import TraceWriter
 from cyan.config import CyanConfig, get_config
@@ -33,14 +24,14 @@ from cyan.errors import HandlerError
 from cyan.service.logging_setup import setup_logging
 from cyan.service.protocol.commands import (
     WIRE_PROTOCOL_VERSION,
-    AgentRunCommand,
-    AgentRunResult,
     CoreShutdownCommand,
     CoreShutdownResult,
     EventSubscribeCommand,
     EventSubscribeResult,
     IncidentDecideCommand,
     IncidentDecideResult,
+    IncidentFollowUpCommand,
+    IncidentFollowUpResult,
     IncidentReviewCommand,
     IncidentReviewResult,
     JobCancelCommand,
@@ -57,19 +48,8 @@ from cyan.service.protocol.commands import (
     LaunchPreviewResult,
     LaunchStartCommand,
     LaunchStartResult,
-    PermissionRespondCommand,
-    PermissionRespondResult,
+    PingCommand,
     PongResult,
-    SessionCloseCommand,
-    SessionCloseResult,
-    SessionCompactCommand,
-    SessionCompactResult,
-    SessionCreateCommand,
-    SessionCreateResult,
-    SessionGetHistoryCommand,
-    SessionGetHistoryResult,
-    SessionSendMessageCommand,
-    SessionSendMessageResult,
 )
 from cyan.service.protocol.envelope import EventPushEnvelope
 from cyan.service.transport.ipc_broadcaster import IpcEventBroadcaster
@@ -99,59 +79,48 @@ JOB_NOT_FOUND = -32030
 INCIDENT_DECISION_FAILED = -32031
 CORE_SHUTTING_DOWN = -32032
 INCIDENT_REVIEW_FAILED = -32033
+PROTOCOL_INCOMPATIBLE = -32034
 
 
+# 返回当前 UTC 时间
 def _now() -> str:
-    return datetime.datetime.now(UTC).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-# 将一个文本字段原文替换为字符数和 UTF-8 字节数
+# 将 trace 中的文本替换为长度摘要
 def _summarize_trace_text(data: dict[str, Any], field: str) -> None:
     value = str(data.pop(field, ""))
     data[f"{field}_chars"] = len(value)
     data[f"{field}_bytes"] = len(value.encode("utf-8"))
 
 
-# 将一个映射字段原文替换为键名、字符数和 UTF-8 字节数
+# 将 trace 中的映射替换为键名和长度摘要
 def _summarize_trace_mapping(data: dict[str, Any], field: str) -> None:
     value = data.pop(field, {})
     encoded = json.dumps(value, ensure_ascii=False, default=str)
-    data[f"{field.removesuffix('s')}_keys"] = (
-        sorted(value) if isinstance(value, dict) else []
-    )
+    data[f"{field}_keys"] = sorted(value) if isinstance(value, dict) else []
     data[f"{field}_chars"] = len(encoded)
     data[f"{field}_bytes"] = len(encoded.encode("utf-8"))
 
 
-# 将事件中的内容型字段替换为尺寸摘要，避免 daemon trace 复制业务 payload
+# 生成不复制日志、补丁、工具输出或用户文本的事件摘要
 def _trace_event_data(event: BaseModel) -> dict[str, Any]:
     data = event.model_dump()
-    event_type = data.get("type")
+    event_type = str(data.get("type"))
     if event_type == "tool.call_started":
         _summarize_trace_mapping(data, "params")
     elif event_type == "tool.call_finished":
         _summarize_trace_text(data, "output")
     elif event_type == "tool.call_failed":
         _summarize_trace_text(data, "error_message")
-    elif event_type == "permission.requested":
-        _summarize_trace_mapping(data, "params")
-        _summarize_trace_text(data, "param_preview")
-    else:
-        content_field = {
-            "run.started": "goal",
-            "llm.token": "token",
-            "log.line": "message",
-            "session.message_received": "content",
-            "subagent.started": "description",
-            "skill.invoked": "arguments",
-            "patch.proposed": "summary",
-        }.get(str(event_type))
-        if content_field is not None:
-            _summarize_trace_text(data, content_field)
+    elif event_type == "run.started":
+        _summarize_trace_text(data, "goal")
+    elif event_type == "llm.token":
+        _summarize_trace_text(data, "token")
     return data
 
 
-# 生成不含 MCP 环境、命令参数或其他凭据值的 daemon 配置日志摘要
+# 生成不含模型扩展、密钥或进程参数的 daemon 配置摘要
 def _config_log_data(config: CyanConfig) -> dict[str, Any]:
     return {
         "host": config.host,
@@ -159,13 +128,12 @@ def _config_log_data(config: CyanConfig) -> dict[str, Any]:
         "log_level": config.logging.level,
         "log_format": config.logging.format,
         "model": config.llm.default_model,
-        "agent_max_steps": config.agent.max_steps,
         "trace_enabled": config.trace.enabled,
-        "mcp_server_count": len(config.mcp.servers),
     }
 
 
 class CoreApp:
+    # 初始化双进程 daemon 的训练和 Incident 所有者
     def __init__(self) -> None:
         self._start_time = time.monotonic()
         self._startup_workspace_root = Path.cwd().resolve()
@@ -173,10 +141,7 @@ class CoreApp:
         self._broadcaster: IpcEventBroadcaster | None = None
         self._trace: TraceWriter | None = None
         self._config: CyanConfig | None = None
-        self._running_runs: set[asyncio.Task[Any]] = set()
-        self._sessions: SessionManager | None = None
-        self._permission_manager: PermissionManager | None = None
-        self._mcp_manager: McpServerManager | None = None
+        self._running_tasks: set[asyncio.Task[Any]] = set()
         self._job_store: JobStore | None = None
         self._job_supervisor: JobSupervisor | None = None
         self._incidents: IncidentCoordinator | None = None
@@ -187,7 +152,7 @@ class CoreApp:
         self._shutting_down = False
         self._startup_ready = False
 
-    # 获取进程级排他锁，阻止第二个 daemon 在端口检查前修改恢复状态
+    # 获取进程级排他锁并写入 v2 daemon 发现信息
     def _acquire_daemon_lock(self) -> None:
         path = Path("~/.cyan/cyan-core.lock").expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,33 +164,46 @@ class CoreApp:
             lock.close()
             raise SystemExit("cyan-core is already running") from None
         assert self._config is not None
-        metadata = {
-            "host": self._config.host,
-            "port": self._config.port,
-            "workspace_root": str(self._startup_workspace_root),
-            "pid": os.getpid(),
-            "protocol_version": WIRE_PROTOCOL_VERSION,
-        }
         lock.seek(0)
         lock.truncate()
-        lock.write(json.dumps(metadata, separators=(",", ":"), sort_keys=True))
+        lock.write(
+            json.dumps(
+                {
+                    "host": self._config.host,
+                    "port": self._config.port,
+                    "workspace_root": str(self._startup_workspace_root),
+                    "pid": os.getpid(),
+                    "protocol_version": WIRE_PROTOCOL_VERSION,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
         lock.flush()
         os.fsync(lock.fileno())
         self._daemon_lock = lock
 
-    # 处理 core.ping 请求，返回服务版本、运行时长和接收时间
+    # 处理 core.ping 并明确 v2 协议版本
     async def _ping_handler(self, params: dict[str, Any]) -> PongResult:
-        client = params.get("client", "unknown")
-        logger.debug("ping from %s", client)
+        command = PingCommand.model_validate(params)
+        if (
+            command.protocol_version is not None
+            and command.protocol_version != WIRE_PROTOCOL_VERSION
+        ):
+            raise HandlerError(
+                PROTOCOL_INCOMPATIBLE,
+                f"protocol version {command.protocol_version} is incompatible; "
+                f"server uses {WIRE_PROTOCOL_VERSION}",
+            )
         return PongResult(
             server_version=cyan.__version__,
             protocol_version=WIRE_PROTOCOL_VERSION,
             startup_workspace_root=str(self._startup_workspace_root),
             uptime_ms=int((time.monotonic() - self._start_time) * 1000),
-            received_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            received_at=_now(),
         )
 
-    # 接受已连接本机客户端的停止请求，并在响应写回后唤醒统一清理流程
+    # 接受停止请求并唤醒统一清理流程
     async def _shutdown_handler(self, params: dict[str, Any]) -> CoreShutdownResult:
         CoreShutdownCommand.model_validate(params)
         if self._shutdown_event is None:
@@ -239,65 +217,28 @@ class CoreApp:
         asyncio.get_running_loop().call_later(0.05, self._shutdown_event.set)
         return CoreShutdownResult()
 
-    # 将 EventBus 事件写入 trace（作为 EventBus 订阅者）
+    # 将 Agent 事件写入脱敏 daemon trace
     async def _trace_event_handler(self, event: BaseModel) -> None:
-        assert self._trace is not None
-        event_dict = _trace_event_data(event)
-        self._trace.emit(
-            TraceRecord(
-                ts=_now(),
-                direction="CORE",
-                layer="event",
-                kind="event",
-                run_id=event_dict.get("run_id"),
-                data=event_dict,
+        if self._trace is not None:
+            self._trace.emit(
+                TraceRecord(
+                    ts=_now(),
+                    direction="CORE",
+                    layer="event",
+                    kind="event",
+                    run_id=event.model_dump().get("run_id"),
+                    data=_trace_event_data(event),
+                )
             )
-        )
 
-    # 启动一次 agent run：异步创建 AgentRunner 并立即返回 run_id
-    async def _agent_run_handler(self, params: dict[str, Any]) -> AgentRunResult:
-        assert self._sessions is not None
-        cmd = AgentRunCommand.model_validate(params)
-        session = await self._sessions.create(mode="one_shot", title=cmd.goal[:40])
-        run_id = new_run_id()
-        run_task = asyncio.create_task(
-            self._sessions.send_message(session.id, cmd.goal, run_id=run_id)
-        )
-        self._running_runs.add(run_task)
-        run_task.add_done_callback(self._running_runs.discard)
-        return AgentRunResult(run_id=run_id)
-
-    # 创建 chat 或 one_shot session，并返回 session_id
-    async def _session_create_handler(self, params: dict[str, Any]) -> SessionCreateResult:
-        assert self._sessions is not None
-        cmd = SessionCreateCommand.model_validate(params)
-        if cmd.mode == "incident":
-            raise HandlerError(-32602, "incident sessions are daemon-owned")
-        session = await self._sessions.create(
-            mode=cmd.mode,
-            title=cmd.title,
-            workspace_root=cmd.workspace_root,
-        )
-        return SessionCreateResult(session_id=session.id, status=session.status)
-
-    # 将 JobSupervisor 的失败回调转交给 IncidentCoordinator
+    # 将 JobSupervisor 的失败回调交给 IncidentCoordinator
     async def _job_failure_handler(
-        self,
-        job: JobRecord,
-        attempt: AttemptRecord,
-        failure: FailureRecord,
+        self, job: JobRecord, attempt: AttemptRecord, failure: FailureRecord
     ) -> None:
         assert self._incidents is not None
         await self._incidents.handle_failure(job, attempt, failure)
 
-    # 为 Incident session 注入只读工具和不可压缩系统约束
-    def _run_profile(self, session: Session) -> RunProfile | None:
-        if session.mode != "incident":
-            return None
-        assert self._incidents is not None
-        return self._incidents.profile_for_session(session)
-
-    # 在唯一启动锁内创建真实后台进程 Job
+    # 在唯一启动锁内创建真实训练进程
     async def _start_job(self, cmd: JobStartCommand) -> JobStartResult:
         assert self._job_supervisor is not None
         root = Path(cmd.workspace_root).expanduser()
@@ -312,23 +253,19 @@ class CoreApp:
                 )
             except (OSError, ValueError) as exc:
                 raise HandlerError(-32602, str(exc)) from exc
-            assert job.current_attempt_id is not None
             if job.status == "running":
                 await self._publish_latest_job_event(job, "job.started")
             task = asyncio.create_task(self._watch_job(job.id), name=f"job-watch-{job.id}")
-            self._running_runs.add(task)
-            task.add_done_callback(self._running_runs.discard)
+            self._running_tasks.add(task)
+            task.add_done_callback(self._running_tasks.discard)
             return JobStartResult(job_id=job.id)
 
-    # 校验公开 job.start 参数后复用唯一训练启动边界
+    # 校验 job.start 参数并复用训练启动边界
     async def _job_start_handler(self, params: dict[str, Any]) -> JobStartResult:
         return await self._start_job(JobStartCommand.model_validate(params))
 
-    # 解析训练命令并返回不含继承环境的确定性预览
-    async def _launch_preview_handler(
-        self,
-        params: dict[str, Any],
-    ) -> LaunchPreviewResult:
+    # 解析训练命令并返回确定性预览
+    async def _launch_preview_handler(self, params: dict[str, Any]) -> LaunchPreviewResult:
         cmd = LaunchPreviewCommand.model_validate(params)
         root = Path(cmd.workspace_root).expanduser()
         try:
@@ -345,11 +282,8 @@ class CoreApp:
             fingerprint=fingerprint,
         )
 
-    # 重新解析已确认命令并在指纹一致时启动真实训练
-    async def _launch_start_handler(
-        self,
-        params: dict[str, Any],
-    ) -> LaunchStartResult:
+    # 重新解析并在预览指纹一致时启动训练
+    async def _launch_start_handler(self, params: dict[str, Any]) -> LaunchStartResult:
         cmd = LaunchStartCommand.model_validate(params)
         root = Path(cmd.workspace_root).expanduser()
         try:
@@ -368,40 +302,22 @@ class CoreApp:
         )
         return LaunchStartResult(job_id=result.job_id)
 
-    # 将指定 Attempt 最新的持久化状态转换后发布到实时事件流
-    async def _publish_latest_job_event(
-        self,
-        job: JobRecord,
-        expected_type: JobEventType,
-    ) -> None:
+    # 从 JobStore 读取并广播指定状态事件
+    async def _publish_latest_job_event(self, job: JobRecord, expected_type: JobEventType) -> None:
         assert self._job_store is not None
         if job.current_attempt_id is None:
             return
-        persisted = self._job_store.find_attempt_event(
-            job.id,
-            job.current_attempt_id,
-            expected_type,
-        )
-        if persisted is None:
-            logger.error(
-                "missing persisted job event job_id=%s attempt_id=%s expected=%s",
-                job.id,
-                job.current_attempt_id,
-                expected_type,
-            )
-            return
-        canonical = self._canonical_job_event(persisted)
-        if canonical is not None:
-            await self._bus.publish(canonical)
+        event = self._job_store.find_attempt_event(job.id, job.current_attempt_id, expected_type)
+        if event is not None:
+            canonical = self._canonical_job_event(event)
+            if canonical is not None:
+                await self._bus.publish(canonical)
 
-    # 等待一次 Job Attempt 结束并广播最终退出状态
+    # 等待一次 Job Attempt 结束并广播最终状态
     async def _watch_job(self, job_id: str) -> None:
         assert self._job_supervisor is not None
         job = await self._job_supervisor.wait(job_id)
-        await self._publish_latest_job_event(
-            job,
-            cast(JobEventType, f"job.{job.status}"),
-        )
+        await self._publish_latest_job_event(job, cast(JobEventType, f"job.{job.status}"))
 
     # 返回所有 Job 的安全增强视图
     async def _job_list_handler(self, params: dict[str, Any]) -> JobListResult:
@@ -409,17 +325,16 @@ class CoreApp:
         assert self._incidents is not None
         return JobListResult(jobs=await self._incidents.list_jobs())
 
-    # 返回单个 Job、当前 Attempt 与 Incident artifact
+    # 返回单个 Job、Attempt 与 Incident 当前快照
     async def _job_get_handler(self, params: dict[str, Any]) -> JobGetResult:
         cmd = JobGetCommand.model_validate(params)
         assert self._incidents is not None
         try:
-            view = await self._incidents.job_view(cmd.job_id)
+            return JobGetResult.model_validate(await self._incidents.job_view(cmd.job_id))
         except (FileNotFoundError, KeyError, ValueError) as exc:
             raise HandlerError(JOB_NOT_FOUND, "job not found") from exc
-        return JobGetResult.model_validate(view)
 
-    # 用户明确请求时终止当前 Job 进程组
+    # 用户明确请求时终止 Job 进程组
     async def _job_cancel_handler(self, params: dict[str, Any]) -> JobCancelResult:
         cmd = JobCancelCommand.model_validate(params)
         assert self._job_supervisor is not None
@@ -429,17 +344,13 @@ class CoreApp:
             raise HandlerError(JOB_NOT_FOUND, "job not found") from exc
         return JobCancelResult(status=job.status)
 
-    # 按字节游标返回一段原始 stdout 或 stderr
+    # 按字节游标返回一段原始训练日志
     async def _job_read_log_handler(self, params: dict[str, Any]) -> JobReadLogResult:
         cmd = JobReadLogCommand.model_validate(params)
         assert self._job_store is not None
         try:
             chunk = self._job_store.read_log(
-                cmd.job_id,
-                cmd.attempt_id,
-                cmd.stream,
-                cmd.offset,
-                min(cmd.limit, 32 * 1024),
+                cmd.job_id, cmd.attempt_id, cmd.stream, cmd.offset, min(cmd.limit, 32 * 1024)
             )
         except (FileNotFoundError, ValueError) as exc:
             raise HandlerError(JOB_NOT_FOUND, "job or attempt not found") from exc
@@ -450,11 +361,8 @@ class CoreApp:
             eof=chunk.eof,
         )
 
-    # 执行一次 patch approve/reject 决策及可选 smoke
-    async def _incident_decide_handler(
-        self,
-        params: dict[str, Any],
-    ) -> IncidentDecideResult:
+    # 执行 Incident 审批决策
+    async def _incident_decide_handler(self, params: dict[str, Any]) -> IncidentDecideResult:
         cmd = IncidentDecideCommand.model_validate(params)
         assert self._incidents is not None
         try:
@@ -469,122 +377,47 @@ class CoreApp:
             raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
         return IncidentDecideResult(status=status)
 
-    # 返回当前待审批 proposal 的只读前后文本
-    async def _incident_review_handler(
-        self,
-        params: dict[str, Any],
-    ) -> IncidentReviewResult:
+    # 返回当前 proposal 的只读前后文本
+    async def _incident_review_handler(self, params: dict[str, Any]) -> IncidentReviewResult:
         cmd = IncidentReviewCommand.model_validate(params)
         assert self._incidents is not None
         try:
             path, before, after = self._incidents.review_proposal(
-                cmd.job_id,
-                cmd.incident_id,
-                cmd.proposal_id,
+                cmd.job_id, cmd.incident_id, cmd.proposal_id
             )
         except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
             raise HandlerError(INCIDENT_REVIEW_FAILED, str(exc)) from exc
         return IncidentReviewResult(
-            proposal_id=cmd.proposal_id,
-            path=path,
-            before_text=before,
-            after_text=after,
+            proposal_id=cmd.proposal_id, path=path, before_text=before, after_text=after
         )
 
-    # 向 session 发送一条用户消息，后台执行并立即返回可订阅的 run_id
-    async def _session_send_handler(self, params: dict[str, Any]) -> SessionSendMessageResult:
-        assert self._sessions is not None
-        cmd = SessionSendMessageCommand.model_validate(params)
-        run_id = new_run_id()
-        coroutine: Coroutine[Any, Any, Any]
-        if (
-            self._incidents is not None
-            and self._incidents.is_incident_session(cmd.session_id)
-        ):
-            try:
-                await self._incidents.follow_up(
-                    cmd.session_id,
-                    cmd.content,
-                    run_id,
-                )
-            except (KeyError, ValueError) as exc:
-                raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
-            return SessionSendMessageResult(run_id=run_id)
-        else:
-            coroutine = self._sessions.send_message(
-                cmd.session_id,
-                cmd.content,
-                run_id=run_id,
-            )
-        task = asyncio.create_task(coroutine, name=f"session-run-{run_id}")
-        self._running_runs.add(task)
-        task.add_done_callback(self._running_runs.discard)
-        return SessionSendMessageResult(run_id=run_id)
+    # 通过明确 Incident ID 创建一轮追问并先返回 run_id
+    async def _incident_follow_up_handler(self, params: dict[str, Any]) -> IncidentFollowUpResult:
+        cmd = IncidentFollowUpCommand.model_validate(params)
+        assert self._incidents is not None
+        try:
+            run_id = await self._incidents.follow_up(cmd.incident_id, cmd.content)
+        except (KeyError, ValueError) as exc:
+            raise HandlerError(INCIDENT_DECISION_FAILED, str(exc)) from exc
+        return IncidentFollowUpResult(run_id=run_id)
 
-    # 返回 session 的完整 Anthropic messages 历史
-    async def _session_history_handler(self, params: dict[str, Any]) -> SessionGetHistoryResult:
-        assert self._sessions is not None
-        cmd = SessionGetHistoryCommand.model_validate(params)
-        messages = await self._sessions.get_history(cmd.session_id)
-        return SessionGetHistoryResult(messages=messages)
-
-    # 接收客户端权限审批响应，resolve 对应挂起的 Future
-    async def _permission_respond_handler(self, params: dict[str, Any]) -> PermissionRespondResult:
-        cmd = PermissionRespondCommand.model_validate(params)
-        logger.info(
-            "permission.respond received tool_use_id=%s decision=%s",
-            cmd.tool_use_id, cmd.decision,
-        )
-        if self._permission_manager is None:
-            logger.error("permission.respond: PermissionManager not initialized")
-            return PermissionRespondResult()
-        self._permission_manager.respond(cmd.tool_use_id, cmd.decision)
-        return PermissionRespondResult()
-
-    # 手动压缩 session thread，将摘要持久化写入 thread.jsonl
-    async def _session_compact_handler(self, params: dict[str, Any]) -> SessionCompactResult:
-        assert self._sessions is not None
-        cmd = SessionCompactCommand.model_validate(params)
-        result = await self._sessions.compact(cmd.session_id, cmd.focus)
-        return SessionCompactResult(
-            summary_tokens=result.summary_tokens,
-            saved_tokens=max(0, result.original_token_estimate - result.summary_tokens),
-        )
-
-    # 关闭 session 并返回 closed 状态
-    async def _session_close_handler(self, params: dict[str, Any]) -> SessionCloseResult:
-        assert self._sessions is not None
-        cmd = SessionCloseCommand.model_validate(params)
-        await self._sessions.close(cmd.session_id)
-        return SessionCloseResult(status="closed")
-
-    # 注册客户端事件订阅，可选先回放 events.jsonl 历史再接收实时流
+    # 注册客户端事件订阅并可选回放 Job/Run 摘要
     async def _subscribe_handler(self, params: dict[str, Any]) -> EventSubscribeResult:
         cmd = EventSubscribeCommand.model_validate(params)
         writer = get_connection_writer()
-
         assert self._broadcaster is not None
-        sub_id = self._broadcaster.subscribe(writer, cmd.topics, cmd.scope)
-        replayed_count = 0
+        subscription_id = self._broadcaster.subscribe(writer, cmd.topics, cmd.scope)
+        replayed = 0
         if cmd.scope.startswith("job:"):
-            replayed_count = await self._replay_job_events(
-                cmd.scope[4:],
-                writer,
-                cmd.topics,
-                cmd.after_seq,
+            replayed = await self._replay_job_events(
+                cmd.scope[4:], writer, cmd.topics, cmd.after_seq
             )
         elif cmd.replay_from_run is not None:
-            replayed_count = await self._replay_events(
-                cmd.replay_from_run, writer, cmd.topics
-            )
+            replayed = await self._replay_events(cmd.replay_from_run, writer, cmd.topics)
+        return EventSubscribeResult(subscription_id=subscription_id, replayed_count=replayed)
 
-        return EventSubscribeResult(subscription_id=sub_id, replayed_count=replayed_count)
-
-    # 将磁盘 Job 事件映射为实时总线唯一使用的 canonical schema
-    def _canonical_job_event(
-        self,
-        event: JobEvent,
-    ) -> JobStartedEvent | JobFinishedEvent | None:
+    # 将持久化 JobEvent 转换为总线事件
+    def _canonical_job_event(self, event: JobEvent) -> JobStartedEvent | JobFinishedEvent | None:
         assert self._job_store is not None
         if event.attempt_id is None:
             return None
@@ -609,13 +442,9 @@ class CoreApp:
             ts=event.occurred_at,
         )
 
-    # 从 Job 局部事件流回放 after_seq 之后的状态事件
+    # 回放 Job 局部事件流
     async def _replay_job_events(
-        self,
-        job_id: str,
-        writer: asyncio.StreamWriter,
-        topics: list[str],
-        after_seq: int,
+        self, job_id: str, writer: asyncio.StreamWriter, topics: list[str], after_seq: int
     ) -> int:
         assert self._job_store is not None
         try:
@@ -623,198 +452,137 @@ class CoreApp:
         except (FileNotFoundError, ValueError):
             return 0
         count = 0
+        replay: list[dict[str, object]] = []
         for event in events:
             if event.seq <= after_seq:
                 continue
             try:
                 canonical = self._canonical_job_event(event)
             except (FileNotFoundError, ValueError):
-                logger.warning(
-                    "skip incomplete persisted job event job_id=%s seq=%d",
-                    job_id,
-                    event.seq,
-                )
                 continue
             if canonical is None or not any(
                 fnmatch.fnmatch(canonical.type, pattern) for pattern in topics
             ):
                 continue
-            writer.write(
-                EventPushEnvelope(
-                    event=canonical.model_dump(mode="json")
-                ).model_dump_json().encode()
-                + b"\n"
-            )
+            replay.append(canonical.model_dump(mode="json"))
             count += 1
-        if count:
+        if self._broadcaster is not None:
+            await self._broadcaster.replay(writer, replay)
+        elif count:
+            for replay_event in replay:
+                writer.write(
+                    EventPushEnvelope(event=replay_event).model_dump_json().encode() + b"\n"
+                )
             await writer.drain()
         return count
 
-    # 从 events.jsonl 向 writer 回放匹配 topic 的历史事件，返回已回放条数
+    # 在所有 Incident run 目录中寻找并回放摘要事件
     async def _replay_events(
-        self,
-        run_id: str,
-        writer: asyncio.StreamWriter,
-        topics: list[str],
+        self, run_id: str, writer: asyncio.StreamWriter, topics: list[str]
     ) -> int:
-        path = events_file(run_id)
-        if not path.exists():
-            for candidate in Path("~/.cyan/sessions").expanduser().glob(
-                f"*/runs/{run_id}/events.jsonl"
-            ):
-                path = candidate
-                break
-        if not path.exists():
+        assert self._job_store is not None
+        paths = self._job_store._root.glob(f"*/incidents/*/runs/{run_id}/events.jsonl")
+        path = next(iter(paths), None)
+        if path is None or not path.exists():
             return 0
-
         count = 0
-        for line in path.read_text().splitlines():
-            if not line:
-                continue
+        replay: list[dict[str, object]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            event_type: str = event.get("type", "")
-            if not any(fnmatch.fnmatch(event_type, p) for p in topics):
-                continue
-            envelope = EventPushEnvelope(event=event)
-            writer.write(envelope.model_dump_json().encode() + b"\n")
-            count += 1
-
-        if count:
+            if any(fnmatch.fnmatch(str(event.get("type", "")), pattern) for pattern in topics):
+                replay.append(event)
+                count += 1
+        if self._broadcaster is not None:
+            await self._broadcaster.replay(writer, replay)
+        elif count:
+            for replay_event in replay:
+                writer.write(
+                    EventPushEnvelope(event=replay_event).model_dump_json().encode() + b"\n"
+                )
             await writer.drain()
         return count
 
-    # 启动守护进程：加载配置、初始化日志、启动 trace、启动 TCP 服务器，并等待退出信号
+    # 启动 daemon、恢复训练和 Incident，并注册 v2 RPC
     async def run(self) -> None:
         self._start_time = time.monotonic()
         self._config = get_config()
         setup_logging(self._config)
         self._acquire_daemon_lock()
         self._shutdown_event = asyncio.Event()
-
         if self._config.trace.enabled:
-            trace_path = Path(self._config.trace.file).expanduser()
-            self._trace = TraceWriter(trace_path)
+            self._trace = TraceWriter(Path(self._config.trace.file).expanduser())
             await self._trace.start()
             self._bus.subscribe(self._trace_event_handler)
-
-        policy_file = Path("~/.cyan/policy.toml").expanduser()
-        self._permission_manager = PermissionManager(
-            policy_file=policy_file,
-            timeout_s=self._config.permission.timeout_s,
-        )
-        logger.info(
-            "permission manager: timeout_s=%.1f  persistent=%d entries",
-            self._config.permission.timeout_s,
-            len(load_policy_file(policy_file)),
-        )
-
         self._broadcaster = IpcEventBroadcaster(trace=self._trace)
         self._bus.subscribe(self._broadcaster.handle)
-        sessions_root = Path("~/.cyan/sessions").expanduser()
-        jobs_root = Path("~/.cyan/jobs").expanduser()
-        self._job_store = JobStore(jobs_root)
+        self._job_store = JobStore(Path("~/.cyan/jobs").expanduser())
         self._job_supervisor = JobSupervisor(
-            self._job_store,
-            failure_callback=self._job_failure_handler,
+            self._job_store, failure_callback=self._job_failure_handler
         )
-        interrupted = await self._job_supervisor.recover_interrupted()
-        if interrupted:
-            logger.info("recovered %d interrupted job(s)", len(interrupted))
-        store = SessionStore(sessions_root)
-        assert self._config is not None
-        compact_provider = AnthropicProvider(self._config.llm.default_model)
-
-        self._mcp_manager = McpServerManager()
-
-        self._sessions = SessionManager(
-            store,
-            runner_factory=lambda: AgentRunner(
-                self._config,  # type: ignore[arg-type]
-                bus=self._bus,
-                trace=self._trace,
-                permission_manager=self._permission_manager,
-                mcp_manager=self._mcp_manager,
-                profile_factory=self._run_profile,
-            ),
-            bus=self._bus,
-            provider=compact_provider,
-        )
+        await self._job_supervisor.recover_interrupted()
         self._incidents = IncidentCoordinator(
             self._job_store,
-            self._sessions,
             self._job_supervisor,
             self._bus,
-        )
-        await self._incidents.recover()
-
-        server = SocketServer(
-            self._config.host,
-            self._config.port,
-            self._broadcaster,
+            self._config,
             trace=self._trace,
         )
+        await self._incidents.recover()
+        server = SocketServer(
+            self._config.host, self._config.port, self._broadcaster, trace=self._trace
+        )
         self._server = server
-        server.register("core.ping", self._ping_handler)
-        server.register("core.shutdown", self._shutdown_handler)
-        server.register("agent.run", self._agent_run_handler)
-        server.register("event.subscribe", self._subscribe_handler)
-        server.register("session.create", self._session_create_handler)
-        server.register("session.send_message", self._session_send_handler)
-        server.register("session.get_history", self._session_history_handler)
-        server.register("session.close", self._session_close_handler)
-        server.register("permission.respond", self._permission_respond_handler)
-        server.register("session.compact", self._session_compact_handler)
-        server.register("job.start", self._job_start_handler)
-        server.register("launch.preview", self._launch_preview_handler)
-        server.register("launch.start", self._launch_start_handler)
-        server.register("job.list", self._job_list_handler)
-        server.register("job.get", self._job_get_handler)
-        server.register("job.cancel", self._job_cancel_handler)
-        server.register("job.read_log", self._job_read_log_handler)
-        server.register("incident.decide", self._incident_decide_handler)
-        server.register("incident.review", self._incident_review_handler)
-
+        for method, handler in {
+            "core.ping": self._ping_handler,
+            "core.shutdown": self._shutdown_handler,
+            "event.subscribe": self._subscribe_handler,
+            "launch.preview": self._launch_preview_handler,
+            "launch.start": self._launch_start_handler,
+            "job.start": self._job_start_handler,
+            "job.list": self._job_list_handler,
+            "job.get": self._job_get_handler,
+            "job.cancel": self._job_cancel_handler,
+            "job.read_log": self._job_read_log_handler,
+            "incident.decide": self._incident_decide_handler,
+            "incident.review": self._incident_review_handler,
+            "incident.follow_up": self._incident_follow_up_handler,
+        }.items():
+            server.register(method, handler)
         addr = await server.start()
         self._startup_ready = True
         logger.info("cyan-core %s listening addr=%s", cyan.__version__, addr)
         logger.info("config: %s", _config_log_data(self._config))
-
         loop = asyncio.get_running_loop()
-        assert self._shutdown_event is not None
         loop.add_signal_handler(signal.SIGINT, self._shutdown_event.set)
         loop.add_signal_handler(signal.SIGTERM, self._shutdown_event.set)
-
         await self._shutdown_event.wait()
-
-        logger.info("shutting down")
         self._shutting_down = True
-        if self._job_supervisor is not None:
-            self._job_supervisor.stop_starting()
+        self._job_supervisor.stop_starting()
         async with self._job_start_lock:
             await server.stop_accepting()
         await server.stop()
         if self._incidents is not None:
             await self._incidents.close()
-        if self._job_supervisor is not None and self._job_store is not None:
-            active_jobs = [
-                job.id
-                for job in self._job_store.list_jobs()
-                if job.status in ("starting", "running")
-            ]
-            if active_jobs:
-                await asyncio.gather(
-                    *(self._job_supervisor.cancel(job_id) for job_id in active_jobs),
-                    return_exceptions=True,
-                )
-        for run_task in list(self._running_runs):
-            run_task.cancel()
-        if self._running_runs:
-            await asyncio.gather(*self._running_runs, return_exceptions=True)
-        if self._mcp_manager is not None:
-            await self._mcp_manager.stop_all()
+        if self._job_supervisor is not None:
+            active = (
+                [
+                    job.id
+                    for job in self._job_store.list_jobs()
+                    if job.status in ("starting", "running")
+                ]
+                if self._job_store
+                else []
+            )
+            await asyncio.gather(
+                *(self._job_supervisor.cancel(job_id) for job_id in active), return_exceptions=True
+            )
+        for task in list(self._running_tasks):
+            task.cancel()
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks, return_exceptions=True)
         if self._trace is not None:
             await self._trace.stop()
         if self._daemon_lock is not None:
@@ -827,7 +595,7 @@ class CoreApp:
         self._server = None
 
 
-# 同步入口：启动 CoreApp 事件循环
+# 同步入口：运行 daemon 事件循环
 def run() -> None:
     app = CoreApp()
     try:

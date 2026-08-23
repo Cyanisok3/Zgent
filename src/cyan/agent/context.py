@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,47 +10,38 @@ class ExecutionContext:
     run_id: str
     goal: str
     max_steps: int
-    prefill_messages: list[dict[str, Any]] = field(default_factory=list)
-    session_notes: str = ""
-    global_context: str = ""
-    project_context: str = ""
+    system_prompt_text: str = ""
+    max_input_bytes: int = 128 * 1024
     messages: list[dict[str, Any]] = field(default_factory=list)
     step: int = 0
-    status: str = "running"  # "running" | "success" | "failed"
+    status: str = "running"
     reason: str | None = None
     result: str = ""
-    # skill 或 subagent 角色可覆盖默认 system prompt
-    system_prompt_override: str | None = None
+    initial_input_bytes: int = 0
+    peak_input_bytes: int = 0
+    budget_exhausted: bool = False
 
-    # 初始化消息历史，优先使用 session 完整回放内容
+    # 初始化本轮唯一的用户指令，禁止隐式历史会话注入
     def __post_init__(self) -> None:
-        if self.prefill_messages:
-            self.messages = [dict(m) for m in self.prefill_messages]
-        elif not self.messages:
+        if not self.messages:
             self.messages.append({"role": "user", "content": self.goal})
 
-    # 返回当前 run 的 system prompt；有 override 时跳过 base，直接注入记忆层
-    def system_prompt(self, base: str) -> str:
-        parts = [self.system_prompt_override if self.system_prompt_override else base]
-        if self.global_context.strip():
-            parts.append("\n\n## Global Context\n" + self.global_context.strip())
-        if self.project_context.strip():
-            parts.append("\n\n## Project Context\n" + self.project_context.strip())
-        if self.session_notes.strip():
-            parts.append(
-                "\n\n## Session Notes\n"
-                + self.session_notes.strip()
-                + "\n\nRemember important durable facts by calling note_save."
-            )
-        return "".join(parts)
+    # 返回固定 Incident system prompt，不拼接全局记忆或会话笔记
+    def system_prompt(self, _base: str = "") -> str:
+        return self.system_prompt_text
 
-    # 将 LLM 响应的 content blocks 追加为 assistant 消息
+    # 将 LLM 响应内容追加到当前运行消息
     def add_assistant_message(self, content: list[Any]) -> None:
         self.messages.append({"role": "assistant", "content": content})
 
-    # 将工具调用结果追加为 user 消息；同一步的多个结果共享同一条消息
+    # 将工具结果加入上下文，超限时仅保留结构化错误占位
     def add_tool_result(
-        self, tool_use_id: str, content: str, is_error: bool = False
+        self,
+        tool_use_id: str,
+        content: str,
+        is_error: bool = False,
+        *,
+        tool_schemas: list[dict[str, object]] | None = None,
     ) -> None:
         block: dict[str, Any] = {
             "type": "tool_result",
@@ -58,28 +50,64 @@ class ExecutionContext:
         }
         if is_error:
             block["is_error"] = True
-
-        last = self.messages[-1] if self.messages else None
+        candidate = [*self.messages]
+        last = candidate[-1] if candidate else None
         if (
             last is not None
-            and last["role"] == "user"
-            and isinstance(last["content"], list)
-            and last["content"]
-            and all(b.get("type") == "tool_result" for b in last["content"])
+            and last.get("role") == "user"
+            and isinstance(last.get("content"), list)
+            and last.get("content")
+            and all(
+                isinstance(item, dict) and item.get("type") == "tool_result"
+                for item in last["content"]
+            )
         ):
-            last["content"].append(block)
+            last["content"] = [*last["content"], block]
         else:
-            self.messages.append({"role": "user", "content": [block]})
+            candidate.append({"role": "user", "content": [block]})
+        if self.serialized_size(tool_schemas or [], messages=candidate) > self.max_input_bytes:
+            self.budget_exhausted = True
+            block["content"] = json.dumps(
+                {
+                    "error": "context_budget_exhausted",
+                    "tool_use_id": tool_use_id,
+                },
+                separators=(",", ":"),
+            )
+            block["is_error"] = True
+            if last is None or last.get("role") != "user":
+                candidate[-1] = {"role": "user", "content": [block]}
+        self.messages = candidate
 
-    # 返回 True 表示 loop 应停止（状态不再是 running）
+    # 计算 system、messages 和 tools 序列化后的 UTF-8 总大小
+    def serialized_size(
+        self,
+        tool_schemas: list[dict[str, object]],
+        *,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> int:
+        payload = {
+            "system": self.system_prompt_text,
+            "messages": self.messages if messages is None else messages,
+            "tools": tool_schemas,
+        }
+        return len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+
+    # 记录一次发送前输入大小，供 Incident run 评测使用
+    def observe_input_size(self, size: int) -> None:
+        if self.initial_input_bytes == 0:
+            self.initial_input_bytes = size
+        self.peak_input_bytes = max(self.peak_input_bytes, size)
+
+    # 返回 True 表示当前运行已经结束
     def is_done(self) -> bool:
         return self.status != "running"
 
-    # 将 run 标记为成功
+    # 将运行标记为成功并保留模型最终文字
     def mark_success(self) -> None:
         self.status = "success"
 
-    # 将 run 标记为失败并记录原因
+    # 将运行标记为失败并记录可审计原因
     def mark_failed(self, reason: str) -> None:
         self.status = "failed"
         self.reason = reason

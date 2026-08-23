@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 from cyan.agent.context import ExecutionContext
 from cyan.agent.events.bus import EventBus
@@ -12,122 +11,93 @@ from cyan.agent.llm.base import LLMProvider
 from cyan.agent.tools.invocation import invoke_tool
 from cyan.agent.tools.registry import ToolRegistry
 
-if TYPE_CHECKING:
-    from cyan.agent.compact.compactor import Compactor
-    from cyan.agent.permissions.manager import PermissionManager
-
-
 log = logging.getLogger(__name__)
 
+
+# 返回当前 UTC 时间字符串
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
 class AgentLoop:
-    # 初始化循环依赖以及可选的权限、压缩和会话上下文
-    def __init__(
-        self,
-        provider: LLMProvider,
-        registry: ToolRegistry,
-        bus: EventBus,
-        *,
-        permission_manager: PermissionManager | None = None,
-        compactor: Compactor | None = None,
-        compact_threshold: float = 0.80,
-        session_id: str = "",
-    ) -> None:
+    # 初始化极简 LLM、工具和事件循环
+    def __init__(self, provider: LLMProvider, registry: ToolRegistry, bus: EventBus) -> None:
         self._provider = provider
         self._registry = registry
         self._bus = bus
-        self._permission_manager = permission_manager
-        self._compactor = compactor
-        self._compact_threshold = compact_threshold
-        self._session_id = session_id
 
-    # 驱动 plan→act→observe 循环直到上下文终止；CancelledError 向上传播
+    # 执行 LLM → tool → observe 循环，直到模型结束或达到硬步数上限
     async def run(self, context: ExecutionContext) -> None:
         while not context.is_done():
             context.step += 1
             await self._bus.publish(
                 StepStartedEvent(run_id=context.run_id, step=context.step, ts=_now())
             )
-
-            # [plan] call LLM — API errors terminate the run
+            schemas = self._registry.tool_schemas()
+            input_size = context.serialized_size(schemas)
+            context.observe_input_size(input_size)
+            if input_size > context.max_input_bytes:
+                context.mark_failed("context_budget_exhausted")
+                await self._bus.publish(
+                    StepFinishedEvent(run_id=context.run_id, step=context.step, ts=_now())
+                )
+                break
             try:
                 response = await self._provider.chat(
                     messages=context.messages,
-                    tool_schemas=self._registry.tool_schemas(),
+                    tool_schemas=schemas,
                     bus=self._bus,
                     run_id=context.run_id,
                     step=context.step,
-                    system=context.system_prompt(
-                        "You are a helpful AI assistant. "
-                        "Use the available tools to complete the user's goal. "
-                        "When the goal is fully achieved, respond with a final answer "
-                        "and do not call any more tools."
-                    ),
+                    system=context.system_prompt(),
                 )
             except asyncio.CancelledError:
                 context.mark_failed("cancelled")
                 raise
             except Exception:
-                logging.getLogger(__name__).exception(
-                    "LLM call failed run_id=%s step=%d", context.run_id, context.step
-                )
+                log.exception("LLM call failed run_id=%s step=%d", context.run_id, context.step)
                 context.mark_failed("llm_error")
                 break
 
-            # [observe] append assistant content blocks to context
-            # thinking blocks must come first and be preserved verbatim for extended thinking mode
             blocks: list[dict[str, object]] = list(response.thinking_blocks)
             if response.text:
                 blocks.append({"type": "text", "text": response.text})
-            for tc in response.tool_calls:
+            for tool_call in response.tool_calls:
                 blocks.append(
-                    {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
+                    {
+                        "type": "tool_use",
+                        "id": tool_call.id,
+                        "name": tool_call.name,
+                        "input": tool_call.input,
+                    }
                 )
             context.add_assistant_message(blocks)
-
-            # [act] execute each requested tool; errors become tool results so loop continues
+            context.observe_input_size(context.serialized_size(schemas))
             if response.stop_reason == "tool_use":
-                for tc in response.tool_calls:
-                    result = await invoke_tool(
-                        self._registry, tc, self._bus, context.run_id,
-                        permission_manager=self._permission_manager,
-                        session_id=self._session_id,
-                    )
-                    context.add_tool_result(tc.id, result.content, is_error=result.is_error)
-            elif response.stop_reason == "max_tokens" and response.tool_calls:
-                # Output token limit hit mid-tool-call; input is incomplete.
-                # Add synthetic error results so the conversation stays balanced.
-                for tc in response.tool_calls:
+                for tool_call in response.tool_calls:
+                    result = await invoke_tool(self._registry, tool_call, self._bus, context.run_id)
                     context.add_tool_result(
-                        tc.id,
-                        "Error: output token limit reached before this tool call "
-                        "could be completed. "
-                        "Please break the task into smaller steps and try again.",
-                        is_error=True,
+                        tool_call.id,
+                        result.content,
+                        result.is_error,
+                        tool_schemas=schemas,
                     )
+                    context.observe_input_size(context.serialized_size(schemas))
+            elif response.stop_reason == "max_tokens" and response.tool_calls:
+                for tool_call in response.tool_calls:
+                    context.add_tool_result(
+                        tool_call.id,
+                        "output token limit reached before this tool call completed",
+                        True,
+                        tool_schemas=schemas,
+                    )
+                    context.observe_input_size(context.serialized_size(schemas))
 
-            # Termination check — end_turn wins over max_steps if both hit on same step
             if response.stop_reason == "end_turn":
                 context.result = response.text or ""
                 context.mark_success()
             elif context.step >= context.max_steps:
                 context.mark_failed("exceeded_max_steps")
-
-            # 工具结果追加完毕（messages 末尾为 user）后检查压缩，仅在 run 继续时触发
-            # 此时压缩结果 [user_summary, assistant_ack] 对下一次 LLM 调用是合法输入
-            if (
-                not context.is_done()
-                and response.stop_reason == "tool_use"
-                and self._compactor is not None
-                and self._compact_threshold > 0
-                and response.usage is not None
-                and response.usage.context_pct >= self._compact_threshold
-            ):
-                await self._compactor.compact(context, self._provider)
-
             await self._bus.publish(
                 StepFinishedEvent(run_id=context.run_id, step=context.step, ts=_now())
             )

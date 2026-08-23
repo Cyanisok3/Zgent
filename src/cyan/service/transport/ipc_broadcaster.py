@@ -16,7 +16,7 @@ from cyan.service.protocol.envelope import EventPushEnvelope
 logger = logging.getLogger(__name__)
 
 _DEFAULT_QUEUE_SIZE = 256
-_DROPPABLE_EVENT_TYPES = frozenset({"llm.token", "log.line", "tool.call_finished"})
+_DROPPABLE_EVENT_TYPES = frozenset({"llm.token", "tool.call_finished"})
 
 
 # 返回当前 UTC 时间的 ISO 8601 字符串
@@ -38,6 +38,7 @@ class _Subscription:
     topics: list[str]
     scope: str
     queue: asyncio.Queue[_QueuedEvent]
+    write_lock: asyncio.Lock
     task: asyncio.Task[None] | None = None
 
 
@@ -68,6 +69,7 @@ class IpcEventBroadcaster:
             topics=topics,
             scope=scope,
             queue=asyncio.Queue(maxsize=self._queue_size),
+            write_lock=asyncio.Lock(),
         )
         sub.task = asyncio.create_task(
             self._write_loop(sub),
@@ -75,6 +77,34 @@ class IpcEventBroadcaster:
         )
         self._subscriptions.append(sub)
         return sub_id
+
+    # 在实时事件之前按历史顺序写入订阅回放，避免同一 writer 并发交错
+    async def replay(self, writer: asyncio.StreamWriter, events: list[dict[str, object]]) -> int:
+        sub = next((item for item in self._subscriptions if item.writer is writer), None)
+        if sub is None:
+            return 0
+        count = 0
+        try:
+            async with sub.write_lock:
+                for event in events:
+                    event_type = str(event.get("type", ""))
+                    run_id = event.get("run_id")
+                    item = _QueuedEvent(
+                        payload=EventPushEnvelope(event=event).model_dump_json().encode() + b"\n",
+                        event_type=event_type,
+                        run_id=str(run_id) if run_id is not None else None,
+                    )
+                    writer.write(item.payload)
+                    await writer.drain()
+                    self._trace_push(sub, item)
+                    count += 1
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            self._remove_writer(writer, skip_task=asyncio.current_task())
+            try:
+                writer.close()
+            except Exception:
+                pass
+        return count
 
     # 移除指定 writer 的所有订阅并取消各自写协程
     def unsubscribe(self, writer: asyncio.StreamWriter) -> None:
@@ -125,9 +155,10 @@ class IpcEventBroadcaster:
             while True:
                 item = await sub.queue.get()
                 try:
-                    sub.writer.write(item.payload)
-                    await sub.writer.drain()
-                    self._trace_push(sub, item)
+                    async with sub.write_lock:
+                        sub.writer.write(item.payload)
+                        await sub.writer.drain()
+                        self._trace_push(sub, item)
                 finally:
                     sub.queue.task_done()
         except asyncio.CancelledError:

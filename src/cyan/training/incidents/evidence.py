@@ -7,14 +7,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from cyan.training.incidents.log_tool import FileJobLogReader, JobLogReader, LogStream
-from cyan.training.incidents.models import FailureCapsule, Incident, LogSnapshot
-from cyan.training.incidents.store import IncidentStore
+from cyan.training.incidents.models import FailureCapsule, LogSnapshot
 from cyan.training.jobs.models import FailureRecord
 from cyan.training.jobs.store import JobStore
 
 _CAPSULE_LOG_BYTES = 32 * 1024
-_EVIDENCE_BUDGET_BYTES = 256 * 1024
 _SAFE_ENV_NAMES = frozenset(
     {
         "CONDA_DEFAULT_ENV",
@@ -146,78 +143,6 @@ def _safe_environment(env: dict[str, str]) -> dict[str, str]:
             continue
         summary[key] = env[key][:512]
     return summary
-
-
-class _BudgetedJobLogReader(JobLogReader):
-    # 将日志 reader 绑定到单个失败 Attempt，并持久化累计读取字节数
-    def __init__(
-        self,
-        jobs: JobStore,
-        store: IncidentStore,
-        incident: Incident,
-        byte_limit: int = _EVIDENCE_BUDGET_BYTES,
-    ) -> None:
-        self._jobs = jobs
-        self._store = store
-        self._incident = incident
-        self._byte_limit = byte_limit
-        self._bytes_read = 0
-        self._store.write_evidence_usage(
-            incident.id,
-            bytes_read=0,
-            byte_limit=byte_limit,
-        )
-
-    # 校验 Agent 只能访问当前 Incident 对应日志
-    def _validate(self, job_id: str, attempt_id: str) -> None:
-        if job_id != self._incident.job_id or attempt_id != self._incident.attempt_id:
-            raise ValueError("log access is limited to the current incident attempt")
-
-    # 返回当前 Incident 日志流大小
-    async def size(self, job_id: str, attempt_id: str, stream: LogStream) -> int:
-        self._validate(job_id, attempt_id)
-        path = self._jobs.log_path(job_id, attempt_id, stream)
-        return path.stat().st_size if path.exists() else 0
-
-    # 在总证据预算内读取日志并记录实际字节数
-    async def read(
-        self,
-        job_id: str,
-        attempt_id: str,
-        stream: LogStream,
-        offset: int,
-        limit: int,
-    ) -> bytes:
-        self._validate(job_id, attempt_id)
-        remaining = self._byte_limit - self._bytes_read
-        if remaining <= 0:
-            raise ValueError("incident log evidence budget exhausted")
-        path = self._jobs.log_path(job_id, attempt_id, stream)
-        if not path.exists():
-            return b""
-        with path.open("rb") as handle:
-            handle.seek(offset)
-            content = handle.read(min(limit, remaining))
-        self._bytes_read += len(content)
-        self._store.write_evidence_usage(
-            self._incident.id,
-            bytes_read=self._bytes_read,
-            byte_limit=self._byte_limit,
-        )
-        return content
-
-    # 扫描当前 Attempt 的完整日志，扫描字节不计入返回证据预算
-    async def search(
-        self,
-        job_id: str,
-        attempt_id: str,
-        stream: LogStream,
-        offset: int,
-        query: bytes,
-    ) -> int | None:
-        self._validate(job_id, attempt_id)
-        reader = FileJobLogReader(self._jobs.log_path)
-        return await reader.search(job_id, attempt_id, stream, offset, query)
 
 
 # 执行短 Git 查询；非 Git 或命令失败时返回 None

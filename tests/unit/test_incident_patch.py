@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from cyan.training.incidents.models import Incident
 from cyan.training.incidents.patch import (
     PatchError,
     PatchService,
@@ -21,6 +23,22 @@ def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
 
 
+# 为合并后的 Incident 快照写入最小上下文
+def _seed_incident(store: IncidentStore, workspace: Path) -> None:
+    now = datetime.now(UTC)
+    store.write_incident(
+        Incident(
+            id="incident-1",
+            job_id="job-1",
+            attempt_id="attempt-1",
+            workspace_root=str(workspace.resolve()),
+            failure_path="attempts/attempt-1/failure.json",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
 # 构造已保存 proposal 并返回对应 store
 async def _proposal(tmp_path: Path, old: str, new: str) -> tuple[Path, IncidentStore]:
     workspace = tmp_path / "repo"
@@ -30,6 +48,7 @@ async def _proposal(tmp_path: Path, old: str, new: str) -> tuple[Path, IncidentS
     target.write_text(old + "\n", encoding="utf-8")
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     store = IncidentStore(tmp_path / "incidents")
+    _seed_incident(store, workspace)
     evidence = [
         {
             "source": "workspace",

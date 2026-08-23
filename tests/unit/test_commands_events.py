@@ -40,14 +40,14 @@ def test_ping_command_missing_client_raises() -> None:
 def test_pong_result_roundtrip() -> None:
     pong = PongResult(
         server_version="0.0.1",
-        protocol_version=1,
+        protocol_version=2,
         startup_workspace_root="/tmp/project",
         uptime_ms=42,
         received_at="2026-05-11T00:00:00Z",
     )
     pong2 = PongResult.model_validate(pong.model_dump())
     assert pong2.server_version == "0.0.1"
-    assert pong2.protocol_version == 1
+    assert pong2.protocol_version == 2
     assert pong2.startup_workspace_root == "/tmp/project"
     assert pong2.uptime_ms == 42
 

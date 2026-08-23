@@ -1,102 +1,71 @@
 from __future__ import annotations
 
 import argparse
-import sys
+import asyncio
+import time
 
-from cyan.cli.commands.chat import cmd_chat
-from cyan.cli.commands.core import cmd_core_start, cmd_core_status, cmd_core_stop
-from cyan.cli.commands.ping import cmd_ping
-from cyan.cli.commands.run import cmd_run
-from cyan.cli.commands.trace import cmd_trace
+from cyan.cli.commands.core import _ping_check, cmd_core_start, cmd_core_stop
 from cyan.cli.commands.version import cmd_version
-from cyan.cli.commands.watch import cmd_job_tui, cmd_watch
-from cyan.config import get_config
+from cyan.config import CyanConfig, get_config
 from cyan.service.logging_setup import setup_logging
+from cyan.tui.app import CyanTuiApp
+
+_CORE_START_TIMEOUT_SECONDS = 15.0
 
 
-# CLI 主入口：解析命令行参数并分发到对应子命令
+# 等待 daemon 接受连接，超时则报告启动失败
+async def _wait_for_core(config: CyanConfig) -> None:
+    deadline = time.monotonic() + _CORE_START_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            await _ping_check(config)
+            return
+        except (ConnectionRefusedError, OSError):
+            await asyncio.sleep(0.05)
+    raise RuntimeError(f"core did not start at {config.host}:{config.port}")
+
+
+# 确保 daemon 运行后进入唯一 TUI 产品入口
+def _run_tui(config: CyanConfig) -> None:
+    try:
+        asyncio.run(_ping_check(config))
+    except (ConnectionRefusedError, OSError):
+        cmd_core_start(config)
+    asyncio.run(_wait_for_core(config))
+    CyanTuiApp(config.host, config.port).run()
+
+
+# 解析 cyan 的唯一用户入口和两个 daemon 生命周期命令
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="cyan",
         description="Local ML training Incident Agent",
-        epilog="Run `cyan` in an ML project, then use /monitor to start supervised training.",
+        epilog="Run cyan in an ML project, then use /monitor to supervise training.",
     )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
-    subparsers = parser.add_subparsers(dest="command", metavar="{watch}")
-
-    subparsers.add_parser("ping")
-    subparsers.add_parser("chat")
-
-    run_parser = subparsers.add_parser("run")
-    run_parser.add_argument("--goal", required=True, help="Goal for the agent to accomplish")
-
-    watch_parser = subparsers.add_parser(
-        "watch",
-        help="Compatibility entrypoint for directly launching a training command",
-    )
-    watch_parser.add_argument("argv", nargs=argparse.REMAINDER, help="Command after --")
-
-    core_parser = subparsers.add_parser("core")
+    subparsers = parser.add_subparsers(dest="command", metavar="{core}")
+    core_parser = subparsers.add_parser("core", help="Manage the local daemon")
     core_sub = core_parser.add_subparsers(dest="core_command")
-    core_start_parser = core_sub.add_parser(
-        "start",
-        help="Start the daemon in the background",
-    )
-    core_start_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print machine-readable connection data",
-    )
+    start = core_sub.add_parser("start", help="Start the daemon in the background")
+    start.add_argument("--json", action="store_true", help="Print machine-readable connection data")
     core_sub.add_parser("stop", help="Stop the running daemon")
-    core_sub.add_parser("status", help="Show daemon status")
-
-    trace_parser = subparsers.add_parser("trace")
-    trace_parser.add_argument("run_id", nargs="?", default=None, help="Filter by run ID")
-    trace_parser.add_argument("--layer", choices=["ipc", "event", "llm"], help="Filter by layer")
-    trace_parser.add_argument("--direction", help="Filter by direction (e.g. CORE→LLM)")
-    trace_parser.add_argument("--raw", action="store_true", help="Output raw NDJSON")
-    trace_parser.add_argument("--follow", "-f", action="store_true", help="Follow new records")
-
     args = parser.parse_args()
-
     if args.version:
         cmd_version()
         return
-
     config = get_config()
     setup_logging(config)
-
-    if args.command == "ping":
-        cmd_ping(config)
-    elif args.command == "chat":
-        cmd_chat(config)
-    elif args.command == "run":
-        cmd_run(args.goal, config)
-    elif args.command == "watch":
-        argv = list(args.argv)
-        if argv[:1] == ["--"]:
-            argv = argv[1:]
-        if not argv:
-            watch_parser.error("expected a command after --")
-        cmd_watch(argv, config)
-    elif args.command == "core":
+    if args.command == "core":
         if args.core_command == "start":
             cmd_core_start(config, json_output=args.json)
-        elif args.core_command == "stop":
+            return
+        if args.core_command == "stop":
             cmd_core_stop(config)
-        elif args.core_command == "status":
-            cmd_core_status(config)
-        else:
-            core_parser.print_help()
-            sys.exit(1)
-    elif args.command == "trace":
-        cmd_trace(
-            args.run_id,
-            config,
-            layer=args.layer,
-            direction=args.direction,
-            raw=args.raw,
-            follow=args.follow,
-        )
-    else:
-        cmd_job_tui(config)
+            return
+        core_parser.print_help()
+        raise SystemExit(1)
+    _run_tui(config)
+
+
+if __name__ == "__main__":
+    main()

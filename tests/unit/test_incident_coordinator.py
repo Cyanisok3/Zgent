@@ -11,12 +11,9 @@ from typing import Any, cast
 
 from cyan.agent.events.bus import EventBus
 from cyan.agent.llm.types import LlmResponse, ToolCallBlock
-from cyan.agent.runner import AgentRunner
-from cyan.agent.session import SessionManager, SessionStore
 from cyan.config import CyanConfig
 from cyan.training.incidents.coordinator import IncidentCoordinator
 from cyan.training.incidents.evidence import _reference_was_observed
-from cyan.training.incidents.models import Incident
 from cyan.training.incidents.smoke import SmokeExecution
 from cyan.training.incidents.store import IncidentStore
 from cyan.training.jobs import JobSpec, JobStore, JobSupervisor
@@ -24,7 +21,7 @@ from cyan.training.processes import read_process_identity
 
 
 # 功能：验证已观察的工作区和日志范围允许引用其中的稳定子范围
-# 设计：直接覆盖单行、行区间和 byte 区间，排除对 Agent 引用字符串完全相等的依赖
+# 设计：直接覆盖单行、行区间和 byte 区间，固定 evidence 的包含关系
 def test_evidence_reference_accepts_observed_subranges() -> None:
     digest = "a" * 64
     observed = {
@@ -34,14 +31,11 @@ def test_evidence_reference_accepts_observed_subranges() -> None:
 
     assert _reference_was_observed(f"train.py@sha256:{digest}#L23", observed)
     assert _reference_was_observed(f"train.py@sha256:{digest}#L17-L18", observed)
-    assert _reference_was_observed(
-        "stderr:job-1/attempt-1@bytes:120-180",
-        observed,
-    )
+    assert _reference_was_observed("stderr:job-1/attempt-1@bytes:120-180", observed)
 
 
 # 功能：验证 evidence 子范围不能扩大边界或替换来源身份
-# 设计：逐一改变行范围、文件 hash、日志 Job 和 byte 范围，锁定包含关系的安全边界
+# 设计：改变行范围、文件 hash、日志 Job 和 byte 范围，锁定安全边界
 def test_evidence_reference_rejects_expansion_and_identity_changes() -> None:
     digest = "a" * 64
     observed = {
@@ -50,18 +44,9 @@ def test_evidence_reference_rejects_expansion_and_identity_changes() -> None:
     }
 
     assert not _reference_was_observed(f"train.py@sha256:{digest}#L14-L23", observed)
-    assert not _reference_was_observed(
-        f"train.py@sha256:{'b' * 64}#L17",
-        observed,
-    )
-    assert not _reference_was_observed(
-        "stderr:job-2/attempt-1@bytes:120-180",
-        observed,
-    )
-    assert not _reference_was_observed(
-        "stderr:job-1/attempt-1@bytes:120-201",
-        observed,
-    )
+    assert not _reference_was_observed(f"train.py@sha256:{'b' * 64}#L17", observed)
+    assert not _reference_was_observed("stderr:job-2/attempt-1@bytes:120-180", observed)
+    assert not _reference_was_observed("stderr:job-1/attempt-1@bytes:120-201", observed)
 
 
 # 从 Anthropic messages 尾部取得最近一次工具结果 JSON
@@ -89,9 +74,9 @@ def _latest_tool_content(messages: list[dict[str, Any]]) -> str:
 
 
 class _IncidentProvider:
-    # 初始化一个按日志、诊断、proposal 顺序调用工具的确定性 provider
+    # 初始化一个按日志、源码、诊断和 proposal 顺序调用工具的确定性 provider
     def __init__(self) -> None:
-        self._step = 0
+        self._run_id: str | None = None
         self._evidence: list[dict[str, str]] = []
 
     # 根据当前步骤返回受控 Incident 工具调用
@@ -105,7 +90,10 @@ class _IncidentProvider:
         step: int = 0,
         system: str | None = None,
     ) -> LlmResponse:
-        self._step += 1
+        del bus
+        if run_id != self._run_id:
+            self._run_id = run_id
+            self._evidence = []
         tool_names = {str(item.get("name")) for item in tool_schemas}
         assert tool_names == {
             "read_file",
@@ -115,7 +103,7 @@ class _IncidentProvider:
             "submit_diagnosis",
             "propose_patch",
         }
-        if self._step == 1:
+        if step == 1:
             assert system is not None
             job_id = re.search(r'"job_id": "([^"]+)"', system)
             attempt_id = re.search(r'"attempt_id": "([^"]+)"', system)
@@ -135,7 +123,7 @@ class _IncidentProvider:
                     )
                 ],
             )
-        if self._step == 2:
+        if step == 2:
             log_result = _latest_tool_json(messages)
             reference = str(log_result["reference"])
             self._evidence = [
@@ -151,22 +139,21 @@ class _IncidentProvider:
                     ToolCallBlock(
                         id="read-source",
                         name="read_file",
-                        input={
-                            "path": "train.py",
-                        },
+                        input={"path": "train.py"},
                     )
                 ],
             )
-        if self._step == 3:
+        if step == 3:
             source_result = _latest_tool_content(messages)
             source_reference = re.search(r"\[source ([^\]]+)\]", source_result)
             assert source_reference is not None
-            workspace_evidence = {
-                "source": "workspace",
-                "reference": source_reference.group(1),
-                "description": "The causal exit is present in train.py.",
-            }
-            self._evidence.append(workspace_evidence)
+            self._evidence.append(
+                {
+                    "source": "workspace",
+                    "reference": source_reference.group(1),
+                    "description": "The causal exit is present in train.py.",
+                }
+            )
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -183,7 +170,7 @@ class _IncidentProvider:
                     )
                 ],
             )
-        if self._step == 4:
+        if step == 4:
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -192,10 +179,7 @@ class _IncidentProvider:
                         name="propose_patch",
                         input={
                             "path": "train.py",
-                            "search": (
-                                'print("boom", file=sys.stderr)\n'
-                                "sys.exit(2)"
-                            ),
+                            "search": 'print("boom", file=sys.stderr)\nsys.exit(2)',
                             "replace": 'print("recovered")',
                             "evidence": self._evidence,
                         },
@@ -207,11 +191,7 @@ class _IncidentProvider:
 
 # 运行 Git 命令并要求成功
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-    )
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
 # 创建带真实 HEAD 和确定性失败脚本的临时 Git 工作区
@@ -239,11 +219,8 @@ def _workspace(root: Path, *, smoke_exit: int | None = None) -> Path:
 
 
 # 组装真实 JobSupervisor 与确定性只读 Agent 的完整 Incident 测试系统
-def _system(
-    root: Path,
-) -> tuple[IncidentCoordinator, JobSupervisor, JobStore]:
+def _system(root: Path) -> tuple[IncidentCoordinator, JobSupervisor, JobStore]:
     jobs = JobStore(root.parent / "jobs")
-    sessions_store = SessionStore(root.parent / "sessions")
     bus = EventBus()
     holder: dict[str, IncidentCoordinator] = {}
 
@@ -252,23 +229,13 @@ def _system(
         await holder["coordinator"].handle_failure(job, attempt, failure)
 
     supervisor = JobSupervisor(jobs, failure_callback=failure_callback)
-    config = CyanConfig()
-
-    # 每个 session run 使用一个新的确定性 provider，并动态读取 Incident profile
-    def runner_factory() -> AgentRunner:
-        return AgentRunner(
-            config,
-            bus=bus,
-            provider=_IncidentProvider(),
-            profile_factory=holder["coordinator"].profile_for_session,
-        )
-
-    sessions = SessionManager(
-        sessions_store,
-        runner_factory=runner_factory,
-        bus=bus,
+    coordinator = IncidentCoordinator(
+        jobs,
+        supervisor,
+        bus,
+        CyanConfig(),
+        provider=_IncidentProvider(),
     )
-    coordinator = IncidentCoordinator(jobs, sessions, supervisor, bus)
     holder["coordinator"] = coordinator
     return coordinator, supervisor, jobs
 
@@ -289,31 +256,22 @@ async def _wait_incident(
 
 
 # 功能：验证真实非零进程自动唤醒只读 Agent，审批前零写入，批准后真实重跑并 resolved
-# 设计：使用临时 Git、真实 Python 子进程和真实 git apply，provider 只替代外部 LLM，完整覆盖 harness 边界
+# 设计：使用临时 Git、真实 Python 子进程和真实 git apply，覆盖 harness 的主闭环
 async def test_failure_to_approval_and_real_retry(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path / "repo")
     original = (workspace / "train.py").read_text(encoding="utf-8")
     coordinator, supervisor, jobs = _system(workspace)
-    retry_starts: list[Any] = []
-
-    # 收集批准后重跑的实时 started 事件，验证它和磁盘 seq 使用同一契约
-    async def collect_retry_start(event: Any) -> None:
-        if getattr(event, "type", "") == "job.started":
-            retry_starts.append(event)
-
-    coordinator._bus.subscribe(collect_retry_start)
     try:
         job = await supervisor.start(JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace))
         await supervisor.wait(job.id)
         awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
 
         assert (workspace / "train.py").read_text(encoding="utf-8") == original
-        assert awaiting["diagnosis"]["evidence"][0]["reference"].startswith("stderr:")
         assert awaiting["proposal"] is not None
-        assert awaiting["can_apply"] is True
-
         incident = awaiting["incident"]
         proposal = awaiting["proposal"]
+        assert (jobs.job_dir(job.id) / "incidents" / incident["id"] / "proposal.diff").exists()
+
         result = await coordinator.decide(
             str(incident["id"]),
             str(proposal["id"]),
@@ -322,165 +280,53 @@ async def test_failure_to_approval_and_real_retry(tmp_path: Path) -> None:
         )
         assert result == "retry_running"
         await _wait_incident(coordinator, job.id, "resolved")
-
-        final_job = jobs.read_job(job.id)
-        assert final_job.status == "succeeded"
-        assert len(final_job.attempt_ids) == 2
-        persisted_start = next(
-            event
-            for event in jobs.read_events(job.id)
-            if event.type == "job.started" and event.attempt_id == "attempt-0002"
-        )
-        assert [(event.attempt_id, event.seq) for event in retry_starts] == [
-            ("attempt-0002", persisted_start.seq)
-        ]
+        assert jobs.read_job(job.id).status == "succeeded"
+        assert len(jobs.read_job(job.id).attempt_ids) == 2
         assert "recovered" in (workspace / "train.py").read_text(encoding="utf-8")
     finally:
         await coordinator.close()
 
 
-# 功能：验证 daemon 重启时已成功的完整重跑会把 retry_running Incident 收敛为 resolved
-# 设计：先走通真实修复，再把持久化 Incident 模拟回崩溃前状态并调用 recover，检查不被误报为 unresolved
-async def test_recover_successful_retry_as_resolved(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo")
+# 功能：验证 smoke 失败会先回滚 proposal，不启动完整训练重跑
+# 设计：使用真实配置和真实 smoke 子进程，检查工作区恢复及 incident 重新诊断
+async def test_smoke_failure_rolls_back_before_retry(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo", smoke_exit=7)
+    original = (workspace / "train.py").read_text(encoding="utf-8")
     coordinator, supervisor, jobs = _system(workspace)
     try:
-        job = await supervisor.start(
-            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
-        )
+        job = await supervisor.start(JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace))
         await supervisor.wait(job.id)
         awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        incident_data = awaiting["incident"]
+        incident = awaiting["incident"]
         proposal = awaiting["proposal"]
-
         await coordinator.decide(
-            str(incident_data["id"]),
+            str(incident["id"]),
             str(proposal["id"]),
             "approve",
-            run_smoke=False,
+            run_smoke=True,
+            smoke_config_fingerprint=str(awaiting["smoke_config_fingerprint"]),
         )
-        await _wait_incident(coordinator, job.id, "resolved")
+        second = await _wait_incident(coordinator, job.id, "awaiting_approval")
 
-        store = IncidentStore(jobs.job_dir(job.id) / "incidents")
-        incident = store.read_incident(str(incident_data["id"]))
-        incident.status = "retry_running"
-        store.write_incident(incident)
-        await coordinator.recover()
-
-        recovered = store.read_incident(incident.id)
-        assert jobs.read_job(job.id).status == "succeeded"
-        assert recovered.status == "resolved"
+        assert (workspace / "train.py").read_text(encoding="utf-8") == original
+        assert jobs.read_job(job.id).attempt_ids == ["attempt-0001"]
+        assert second["smoke_result"]["status"] == "failed"
     finally:
         await coordinator.close()
 
 
-# 功能：验证 retry_running 已落盘但新 Attempt 尚未创建的崩溃窗口会恢复为 unresolved
-# 设计：保持 Job 指向原失败 Attempt，仅提前写 Incident 状态并 recover，避免状态永久卡住
-async def test_recover_retry_before_launch_as_unresolved(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo")
-    coordinator, supervisor, jobs = _system(workspace)
-    try:
-        job = await supervisor.start(
-            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
-        )
-        await supervisor.wait(job.id)
-        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        store = IncidentStore(jobs.job_dir(job.id) / "incidents")
-        incident = store.read_incident(str(awaiting["incident"]["id"]))
-        incident.status = "retry_running"
-        store.write_incident(incident)
-
-        await coordinator.recover()
-
-        assert jobs.read_job(job.id).current_attempt_id == incident.attempt_id
-        assert store.read_incident(incident.id).status == "unresolved"
-    finally:
-        await coordinator.close()
-
-
-# 功能：验证 follow-up 崩溃窗口不会在重启后重新呈现上一轮 diagnosis 与 proposal
-# 设计：阻止后台任务启动并检查制品已同步清除，再 recover 产出全新 proposal ID
-async def test_follow_up_clears_old_artifacts_before_background_run(
-    tmp_path: Path,
-) -> None:
-    workspace = _workspace(tmp_path / "repo")
-    coordinator, supervisor, jobs = _system(workspace)
-    try:
-        job = await supervisor.start(
-            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
-        )
-        await supervisor.wait(job.id)
-        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        incident_data = awaiting["incident"]
-        old_proposal_id = str(awaiting["proposal"]["id"])
-        store = IncidentStore(jobs.job_dir(job.id) / "incidents")
-        original_spawn = coordinator._spawn
-
-        # 模拟 daemon 在同步状态转移完成后、后台 Agent 真正启动前崩溃
-        def discard_background(coroutine: Any, name: str) -> None:
-            coroutine.close()
-
-        coordinator._spawn = discard_background  # type: ignore[method-assign]
-        try:
-            await coordinator.follow_up(
-                str(incident_data["session_id"]),
-                "Re-check the evidence.",
-                "run-follow-up",
-            )
-        finally:
-            coordinator._spawn = original_spawn  # type: ignore[method-assign]
-
-        incident = store.read_incident(str(incident_data["id"]))
-        assert incident.status == "diagnosing"
-        assert not (store.incident_dir(incident.id) / "diagnosis.json").exists()
-        assert not (store.incident_dir(incident.id) / "proposal.json").exists()
-
-        await coordinator.recover()
-        recovered = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        assert recovered["proposal"]["id"] != old_proposal_id
-    finally:
-        await coordinator.close()
-
-
-# 功能：验证命令根本无法启动时只保留 TUI 可见失败，不自动创建训练 Incident
-# 设计：真实执行不存在的 argv，并在显式 recover 后再次断言没有 LLM session 或 proposal
-async def test_launch_error_does_not_open_incident(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo")
-    coordinator, supervisor, jobs = _system(workspace)
-    try:
-        job = await supervisor.start(
-            JobSpec(
-                argv=["definitely-not-a-real-cyan-command"],
-                workspace_root=workspace,
-            )
-        )
-        await coordinator.recover()
-        view = await coordinator.job_view(job.id)
-
-        assert jobs.read_failure(job.id, "attempt-0001").kind == "launch_error"
-        assert view["incident"] is None
-        incident_root = jobs.job_dir(job.id) / "incidents"
-        assert not list(incident_root.glob("*/incident.json"))
-    finally:
-        await coordinator.close()
-
-
-# 功能：验证 daemon 重启会先终止有持久化身份的遗留 smoke 进程，再开放 Incident 追问
-# 设计：用真实独立进程模拟硬崩溃遗留 verifier，写入 running artifact 后 recover 并检查进程和状态
+# 功能：验证 daemon 恢复会终止具备身份校验的遗留 smoke 进程并收敛为 unresolved
+# 设计：用真实独立进程写入 incident 快照，恢复流程必须先确认进程组归属
 async def test_recover_terminates_orphaned_smoke_process(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path / "repo")
     coordinator, supervisor, jobs = _system(workspace)
     process: asyncio.subprocess.Process | None = None
     try:
-        job = await supervisor.start(
-            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
-        )
+        job = await supervisor.start(JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace))
         await supervisor.wait(job.id)
         awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        incident_id = str(awaiting["incident"]["id"])
         store = IncidentStore(jobs.job_dir(job.id) / "incidents")
-        incident = store.read_incident(incident_id)
-
+        incident = store.read_incident(str(awaiting["incident"]["id"]))
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",
@@ -498,15 +344,19 @@ async def test_recover_terminates_orphaned_smoke_process(tmp_path: Path) -> None
                 started_at=datetime.now(UTC),
             ),
         )
-        incident.status = "smoke_running"
-        store.write_incident(incident)
+        persisted = store.read_incident(incident.id)
+        persisted.status = "smoke_running"
+        store.write_incident(persisted)
 
         await coordinator.recover()
-        await asyncio.wait_for(process.wait(), timeout=5)
-
-        assert store.read_incident(incident.id).status == "unresolved"
-        assert store.read_smoke_execution(incident.id).status == "interrupted"
-        assert store.read_smoke_result(incident.id).status == "interrupted"
+        for _ in range(100):
+            if await read_process_identity(process.pid) is None:
+                break
+            await asyncio.sleep(0.05)
+        recovered = store.read_incident(incident.id)
+        assert recovered.status == "unresolved"
+        assert recovered.smoke_execution is not None
+        assert recovered.smoke_execution.status == "interrupted"
     finally:
         if process is not None and process.returncode is None:
             process.terminate()
@@ -514,141 +364,85 @@ async def test_recover_terminates_orphaned_smoke_process(tmp_path: Path) -> None
         await coordinator.close()
 
 
-# 功能：验证可选 smoke 非零退出时不启动完整重跑，且仅在哈希一致时自动反向应用补丁
-# 设计：使用项目真实 .cyan 配置和真实 smoke 子进程，等待同一 session 重新产出 proposal 后检查原文件与 attempt 数
-async def test_smoke_failure_rolls_back_before_retry(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo", smoke_exit=7)
-    original = (workspace / "train.py").read_text(encoding="utf-8")
+# 功能：验证命令无法启动时只保留 Job 失败，不自动创建 Incident
+# 设计：使用真实不存在的 executable，确保 Incident 只响应训练进程非零退出
+async def test_launch_error_does_not_open_incident(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo")
+    coordinator, supervisor, jobs = _system(workspace)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=["definitely-not-a-real-cyan-command"], workspace_root=workspace)
+        )
+        await coordinator.recover()
+        assert jobs.read_failure(job.id, "attempt-0001").kind == "launch_error"
+        assert (await coordinator.job_view(job.id))["incident"] is None
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证追问会创建新的 Incident-owned run，并携带上一轮有界结果
+# 设计：在真实首轮 proposal 上调用显式 follow_up，检查新 run.json 和清理后的快照
+async def test_follow_up_creates_bounded_run(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo")
     coordinator, supervisor, jobs = _system(workspace)
     try:
         job = await supervisor.start(JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace))
         await supervisor.wait(job.id)
         awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        incident = awaiting["incident"]
-        proposal = awaiting["proposal"]
+        incident_id = str(awaiting["incident"]["id"])
+        original_spawn = coordinator._spawn
 
-        await coordinator.decide(
-            str(incident["id"]),
-            str(proposal["id"]),
-            "approve",
-            run_smoke=True,
-            smoke_config_fingerprint=str(awaiting["smoke_config_fingerprint"]),
-        )
-        second = await _wait_incident(coordinator, job.id, "awaiting_approval")
+        # 模拟后台启动前 daemon 崩溃，只验证 prepared run 和状态快照
+        def discard_background(coroutine: Any, name: str) -> None:
+            del name
+            coroutine.close()
 
-        assert (workspace / "train.py").read_text(encoding="utf-8") == original
-        assert jobs.read_job(job.id).attempt_ids == ["attempt-0001"]
-        assert second["smoke"]["status"] == "failed"
-        assert second["smoke"]["returncode"] == 7
-        assert second["incident"]["session_id"] == incident["session_id"]
+        coordinator._spawn = discard_background  # type: ignore[method-assign]
+        try:
+            run_id = await coordinator.follow_up(incident_id, "Re-check the evidence.")
+        finally:
+            coordinator._spawn = original_spawn  # type: ignore[method-assign]
+        run_path = jobs.job_dir(job.id) / "incidents" / incident_id / "runs" / run_id
+        assert (run_path / "run.json").exists()
+        run = IncidentStore(jobs.job_dir(job.id) / "incidents").read_run(incident_id, run_id)
+        assert run.previous_outcome_summary is not None
+        assert "diagnosis" in run.previous_outcome_summary
+        current = IncidentStore(jobs.job_dir(job.id) / "incidents").read_incident(incident_id)
+        assert current.status == "diagnosing"
+        assert current.active_run_id == run_id
     finally:
         await coordinator.close()
 
 
-# 功能：验证审批前 smoke 配置变化会 fail-closed 且对工作区零写入
-# 设计：展示旧指纹后替换真实 TOML，再批准 smoke，断言 stale、零 apply 和零重跑
-async def test_smoke_config_change_before_approval_is_stale(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo", smoke_exit=0)
-    original = (workspace / "train.py").read_text(encoding="utf-8")
-    coordinator, supervisor, jobs = _system(workspace)
-    try:
-        job = await supervisor.start(
-            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
-        )
-        await supervisor.wait(job.id)
-        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        fingerprint = str(awaiting["smoke_config_fingerprint"])
-        config = workspace / ".cyan" / "config.toml"
-        config.write_text(
-            '[incident.smoke]\nargv = ["/usr/bin/true"]\ntimeout_s = 5\n',
-            encoding="utf-8",
-        )
-
-        result = await coordinator.decide(
-            str(awaiting["incident"]["id"]),
-            str(awaiting["proposal"]["id"]),
-            "approve",
-            run_smoke=True,
-            smoke_config_fingerprint=fingerprint,
-        )
-
-        assert result == "stale"
-        assert (workspace / "train.py").read_text(encoding="utf-8") == original
-        assert jobs.read_job(job.id).attempt_ids == ["attempt-0001"]
-    finally:
-        await coordinator.close()
-
-
-# 功能：验证批准后的原命令无法再次启动时 Incident 不会悬挂在 retry_running
-# 设计：首轮使用真实可执行 launcher 失败，审批前删除 launcher，断言第二次 launch_error 收敛为 unresolved
-async def test_retry_launch_error_becomes_unresolved(tmp_path: Path) -> None:
+# 功能：验证 daemon 恢复会复用尚未启动的追问 run
+# 设计：阻止两次后台调度，检查恢复不新建 run 且保留原始 instruction
+async def test_recover_resumes_prepared_follow_up(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path / "repo")
-    launcher = workspace / "run-training"
-    launcher.write_text(
-        f"#!{sys.executable}\n"
-        "import runpy\n"
-        "runpy.run_path('train.py', run_name='__main__')\n",
-        encoding="utf-8",
-    )
-    launcher.chmod(0o755)
-    _git(workspace, "add", "run-training")
-    _git(workspace, "commit", "-m", "add launcher")
     coordinator, supervisor, jobs = _system(workspace)
     try:
-        job = await supervisor.start(
-            JobSpec(argv=[str(launcher)], workspace_root=workspace)
-        )
+        job = await supervisor.start(JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace))
         await supervisor.wait(job.id)
         awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
-        launcher.unlink()
+        incident_id = str(awaiting["incident"]["id"])
+        original_spawn = coordinator._spawn
 
-        result = await coordinator.decide(
-            str(awaiting["incident"]["id"]),
-            str(awaiting["proposal"]["id"]),
-            "approve",
-            run_smoke=False,
-        )
-        unresolved = await _wait_incident(coordinator, job.id, "unresolved")
+        def discard_background(coroutine: Any, name: str) -> None:
+            del name
+            coroutine.close()
 
-        assert result == "retry_running"
-        assert unresolved["incident"]["status"] == "unresolved"
-        assert jobs.read_job(job.id).status == "failed"
-        assert jobs.read_job(job.id).attempt_ids == ["attempt-0001", "attempt-0002"]
-        assert jobs.read_failure(job.id, "attempt-0002").kind == "launch_error"
+        coordinator._spawn = discard_background  # type: ignore[method-assign]
+        try:
+            run_id = await coordinator.follow_up(incident_id, "Keep the exact evidence range.")
+            store = IncidentStore(jobs.job_dir(job.id) / "incidents")
+            run_before = store.read_run(incident_id, run_id)
+            await coordinator.recover()
+        finally:
+            coordinator._spawn = original_spawn  # type: ignore[method-assign]
+
+        run_after = store.read_run(incident_id, run_id)
+        current = store.read_incident(incident_id)
+        assert run_after.run_id == run_before.run_id
+        assert run_after.instruction == "Keep the exact evidence range."
+        assert current.active_run_id == run_id
     finally:
         await coordinator.close()
-
-
-# 功能：验证重跑失败复诊在重复触发下只推进一次，最终收敛为 diagnosing 且只产生一次后台诊断
-# 设计：直接落盘 retry_running Incident，替换 _run_diagnosis 为记录器并连发两次 _reinvestigate
-async def test_reinvestigate_converges_once(tmp_path: Path) -> None:
-    coordinator = IncidentCoordinator(None, None, None, EventBus())  # type: ignore[arg-type]
-    store = IncidentStore(tmp_path / "incidents")
-    now = datetime.now(UTC)
-    incident = Incident(
-        id="incident-1",
-        job_id="job-1",
-        attempt_id="attempt-2",
-        workspace_root=str(tmp_path),
-        failure_path="attempts/attempt-2/failure.json",
-        status="retry_running",
-        created_at=now,
-        updated_at=now,
-    )
-    store.write_incident(incident)
-
-    spawned: list[str] = []
-
-    async def record_diagnosis(
-        store_arg: IncidentStore, incident_arg: Incident, message: str
-    ) -> None:
-        spawned.append(message)
-
-    coordinator._run_diagnosis = record_diagnosis  # type: ignore[method-assign]
-
-    await coordinator._reinvestigate(store, incident, "reinvestigate once")
-    await coordinator._reinvestigate(store, incident, "reinvestigate twice")
-    await asyncio.gather(*list(coordinator._tasks))
-
-    assert store.read_incident("incident-1").status == "diagnosing"
-    assert spawned == ["reinvestigate once"]

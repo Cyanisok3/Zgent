@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from cyan.training.incidents.smoke import SmokeExecution, SmokeResult
+
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -56,9 +58,14 @@ class Incident(BaseModel):
     workspace_root: str
     failure_path: str
     status: IncidentStatus = "diagnosing"
-    session_id: str | None = Field(default=None, pattern=_ID_PATTERN)
     active_run_id: str | None = Field(default=None, pattern=_ID_PATTERN)
     active_proposal_id: str | None = Field(default=None, pattern=_ID_PATTERN)
+    diagnosis: Diagnosis | None = None
+    proposal: Proposal | None = None
+    apply_receipt: PatchReceipt | None = None
+    smoke_execution: SmokeExecution | None = None
+    smoke_result: SmokeResult | None = None
+    last_outcome: str | None = Field(default=None, max_length=4000)
     created_at: datetime
     updated_at: datetime
 

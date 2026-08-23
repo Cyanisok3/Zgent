@@ -10,7 +10,7 @@ from cyan.service.protocol.envelope import JsonRpcRequest
 
 type EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
-_MAX_LINE_BYTES = 64 * 1024 * 1024  # 64 MB per frame，兼容 MCP 大文件工具结果
+_MAX_LINE_BYTES = 64 * 1024 * 1024  # 64 MB per frame，容纳有界 IPC 响应
 
 
 class IpcError(RuntimeError):

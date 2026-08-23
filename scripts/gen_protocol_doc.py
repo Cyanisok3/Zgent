@@ -69,6 +69,7 @@ def generate() -> str:
         "## Transport",
         "",
         "- TCP loopback `127.0.0.1:7437` (`CYAN_HOST` / `CYAN_PORT` override it).",
+        f"- Wire protocol version: `{commands.WIRE_PROTOCOL_VERSION}`.",
         "- Each frame is one newline-terminated JSON object (NDJSON).",
         "- Commands use JSON-RPC 2.0; server pushes use `kind=event`.",
         "- `event.subscribe` supports `global`, `run:<id>`, and `job:<id>` scopes.",
@@ -103,12 +104,11 @@ def generate() -> str:
             "| `-32601` | Method not found |",
             "| `-32602` | Invalid params |",
             "| `-32603` | Internal error |",
-            "| `-32010` | Session not found |",
-            "| `-32011` | Session closed |",
-            "| `-32012` | Session busy |",
             "| `-32030` | Job not found |",
             "| `-32031` | Incident decision failed |",
             "| `-32032` | Core is shutting down |",
+            "| `-32033` | Incident review failed |",
+            "| `-32034` | Wire protocol is incompatible |",
             "",
         ]
     )

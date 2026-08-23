@@ -104,8 +104,8 @@ def test_job_log_response_trace_redacts_raw_data() -> None:
     assert response.result["data"] == secret
 
 
-# 功能：验证 job 视图、session 历史与错误 trace 均不会复制 Incident 或工具输出
-# 设计：复用同一敏感标记覆盖诊断、补丁、history 和错误 data 四条响应路径
+# 功能：验证 job 视图和错误 trace 均不会复制 Incident 或工具输出
+# 设计：复用同一敏感标记覆盖诊断、补丁和错误 data 三条响应路径
 def test_sensitive_rpc_response_trace_uses_summaries() -> None:
     secret = "SECRET-PATCH-OR-TOOL-OUTPUT"
     job_view = {
@@ -132,14 +132,7 @@ def test_sensitive_rpc_response_trace_uses_summaries() -> None:
     responses = [
         _trace_response("job.get", JsonRpcSuccess(id="1", result=job_view)),
         _trace_response("job.list", JsonRpcSuccess(id="2", result={"jobs": [job_view]})),
-        _trace_response(
-            "session.get_history",
-            JsonRpcSuccess(
-                id="3",
-                result={"messages": [{"role": "user", "content": secret}]},
-            ),
-        ),
-        _trace_response("job.start", make_error("4", -32602, "bad input", secret)),
+        _trace_response("job.start", make_error("3", -32602, "bad input", secret)),
     ]
 
     assert secret not in json.dumps(responses)
@@ -152,20 +145,14 @@ def test_sensitive_rpc_response_trace_uses_summaries() -> None:
     assert responses[0]["result"]["attempt_returncode"] == 7
     assert responses[0]["result"]["argv_count"] == 2
     assert responses[0]["result"]["smoke_config_error_chars"] == len(secret)
-    assert responses[2]["result"] == {"message_count": 1, "roles": ["user"]}
-    assert "data" not in responses[3]["error"]
+    assert "data" not in responses[2]["error"]
 
 
-# 功能：验证用户 goal、session 消息和启动环境进入命令 trace 前不会保留原值
-# 设计：分别调用纯摘要函数并序列化检查唯一敏感标记，同时保留长度和环境键名用于诊断
+# 功能：验证启动环境和 launch 命令进入 trace 前不会保留原值
+# 设计：调用纯摘要函数并序列化检查唯一敏感标记，同时保留长度和环境键名
 def test_sensitive_rpc_command_trace_redacts_content_and_env_values() -> None:
     secret = "USER-OR-ENV-SECRET-秘密"
     traced = [
-        _trace_params("agent.run", {"goal": secret}),
-        _trace_params(
-            "session.send_message",
-            {"session_id": "session-1", "content": secret},
-        ),
         _trace_params(
             "job.start",
             {"argv": ["python"], "env": {"API_TOKEN": secret}},
@@ -182,15 +169,19 @@ def test_sensitive_rpc_command_trace_redacts_content_and_env_values() -> None:
                 "preview_fingerprint": "a" * 64,
             },
         ),
+        _trace_params(
+            "incident.follow_up",
+            {"incident_id": "incident-1", "content": secret},
+        ),
     ]
 
     assert secret not in json.dumps(traced, ensure_ascii=False)
-    assert traced[0]["goal_chars"] == len(secret)
-    assert traced[1]["content_bytes"] == len(secret.encode())
-    assert traced[2]["env"] == {"forwarded_keys": ["API_TOKEN"]}
-    assert traced[3]["command_chars"] == len(secret)
-    assert traced[3]["env"] == {"forwarded_keys": ["API_TOKEN"]}
-    assert traced[4]["command_bytes"] == len(secret.encode())
+    assert traced[0]["env"] == {"forwarded_keys": ["API_TOKEN"]}
+    assert traced[1]["command_chars"] == len(secret)
+    assert traced[1]["env"] == {"forwarded_keys": ["API_TOKEN"]}
+    assert traced[2]["command_bytes"] == len(secret.encode())
+    assert traced[3]["content_chars"] == len(secret)
+    assert traced[3]["content_bytes"] == len(secret.encode())
 
 
 # 功能：验证 incident.review 响应 trace 不复制审阅前后的源码

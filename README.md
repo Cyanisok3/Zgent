@@ -1,23 +1,22 @@
 # cyan
 
-cyan 是一个面向本地机器学习训练崩溃的 Incident Agent。训练正常运行时，daemon 只监管
-真实进程并持久化 stdout/stderr，不调用 LLM；进程非零退出后才唤醒受限 Agent，基于日志和
-当前仓库证据给出诊断与可选补丁。补丁必须经过用户明确批准，并由原训练命令完成最终验证。
+cyan 是一个面向本地机器学习训练崩溃的 Incident Agent。训练正常运行时，daemon 只监管真实
+进程并持久化 stdout/stderr；进程非零退出后才唤醒受限 Agent，基于日志和当前仓库证据给出
+诊断与可选补丁。补丁必须经过用户明确批准，并由原训练命令完成最终验证。
 
-cyan 不做论文检索、指标优化、超参数搜索或 AutoResearch。
+cyan 不做论文检索、指标优化、超参数搜索、实验循环或通用编码 Agent。
 
 ## 快速开始
 
-要求 Python 3.12。仓库开发环境可使用：
+要求 Python 3.12，并在本地安装 `cyan`：
 
 ```bash
-uv sync
 cp .env.example .env
 cd /path/to/your/ml-project
-/path/to/Zgent/.venv/bin/cyan
+cyan
 ```
 
-在 TUI 中：
+在 TUI 中使用：
 
 ```text
 /monitor
@@ -25,9 +24,9 @@ cd /path/to/your/ml-project
 /start
 ```
 
-cyan 会先展示 cwd、可执行文件、最终 argv、环境覆盖项和识别到的配置路径；`/start`
-确认后才启动训练。训练失败后的 diagnosis、证据和 proposed diff 会显示在同一 TUI，
-批准、拒绝和取消训练使用当前状态下出现的上下文选择器。
+TUI 会先展示 cwd、可执行文件、最终 argv、环境覆盖项和配置路径；确认后才启动训练。失败后
+的 diagnosis、证据和 proposed diff 在同一界面展示，批准、拒绝、smoke 选择和取消训练使用
+当前状态下出现的上下文控件。
 
 本地命令只有：
 
@@ -39,43 +38,45 @@ cyan 会先展示 cwd、可执行文件、最终 argv、环境覆盖项和识别
 /help
 ```
 
-输入 `/` 可用上下键和 Enter 补全本地命令与普通 Agent skills。普通聊天工具权限通过独立
-选择器处理，不会扩大 Incident Agent 的只读权限。
+默认状态的普通文本不会发送给 Agent；追问必须显式使用 `/incident <text>`。`Ctrl+Q` 只分离
+TUI，不停止 daemon-owned 训练。
 
-`Ctrl+Q` 只分离 TUI，不停止训练。`cyan watch -- <argv>` 是兼容入口。
+## CLI 与 VS Code
 
-## VS Code Alpha
+```text
+cyan                         # 唯一正常用户入口，启动 TUI
+cyan --version
+cyan core start [--json]     # daemon 发现/后台启动
+cyan core stop               # 通过 RPC 安全停止 daemon
+cyan-core                    # 内部 daemon 进程入口
+```
 
-`vscode/` 提供薄型本地 VSIX。训练、Incident、补丁和重跑仍全部由 Python daemon 负责；
-插件只提供命令预览、底部只读训练日志、diagnosis/evidence、原生 diff 和上下文操作。
-
-当前只支持 macOS/Linux、单个可信本地目录，并要求已安装 `cyan`。构建和安装说明见
-[vscode/README.md](vscode/README.md)。TUI 仍是默认入口，VSIX 尚不面向 Marketplace 分发。
+`watch`、`chat`、`run`、`ping`、`trace`、`core status` 和独立 `cyan-tui` 入口已删除。VS Code
+Alpha 是可选薄客户端：只负责预览、日志、诊断、原生 diff 和上下文操作，训练、Incident、补丁
+与重跑仍由 Python daemon 负责。
 
 ## 启动边界
 
-训练命令由本地 harness 解析，不交给 Agent，也不经 shell 执行。支持引号、反斜杠续行和
-命令开头的 `KEY=VALUE`；拒绝管道、重定向、后台执行和命令替换。复杂逻辑应封装为脚本，
-例如：
+训练命令由本地 harness 解析，不交给 Agent，也不经 shell 执行。支持引号、反斜杠续行和命令
+开头的 `KEY=VALUE`；拒绝管道、重定向、后台执行和命令替换。复杂逻辑应封装为脚本，例如：
 
 ```text
 bash scripts/train_local.sh
 ```
 
-cyan 只监视由自身启动的非交互进程，不附着用户在其他终端自行启动的任务。daemon 保存精确
-argv、cwd 和环境用于重跑；成为父进程不会主动限制训练可用的 CPU 或 GPU。
+daemon 保存精确 argv、cwd 和环境用于重跑，只监视由自身启动的非交互进程。
 
 ## 故障闭环
 
 ```text
 真实非零退出
-→ failure capsule
-→ 有界只读调查
-→ diagnosis
-→ 可选单文件 SEARCH/REPLACE
-→ harness 生成并校验 diff
+→ Failure Capsule
+→ Evidence Selector（最多 32 KiB 初始证据）
+→ 六工具只读 Incident Agent
+→ Diagnosis / 单文件 Proposal
 → 用户审批
-→ 可选 smoke
+→ PatchService
+→ 可选 Smoke
 → 原命令最终重跑
 ```
 
@@ -85,14 +86,29 @@ Incident Agent 只注册：
 read_file, list_dir, search_text, read_job_log, submit_diagnosis, propose_patch
 ```
 
-它不能运行 shell、写工作区、启动 MCP/Skill/subagent 或读取全局 context 和 session notes。
-每轮最多 12 steps，日志证据预算为 256 KiB。
+它不能运行 shell、写工作区、加载全局/项目 context、读取旧 Session、启动 MCP/Skill/subagent
+或执行 Sandbox。每轮最多 12 steps；serialized system、messages 和 tool schemas 的总输入不
+超过 128 KiB，初始 selector 证据不超过 32 KiB。
 
-补丁仅支持对一个已有、不超过 1 MiB 的 UTF-8 文件做一次精确唯一替换。Harness 校验证据
-引用、当前文件 SHA-256、Git root、submodule 边界和 `git apply --check`。批准前只写私有
-Incident artifact；非 Git workspace 可以诊断和审阅 diff，但不能一键应用。
+补丁仅支持对一个已有、不超过 1 MiB 的 UTF-8 文件做一次精确唯一替换。批准前只写 Incident
+artifact；非 Git workspace 可以诊断和审阅 diff，但不能一键应用。
 
-## 可选 smoke verifier
+## 持久化布局
+
+```text
+~/.cyan/jobs/<job_id>/incidents/<incident_id>/
+├── incident.json
+├── proposal.diff              # 有 proposal 时才存在
+├── smoke.stdout.log           # 运行 smoke 时才存在
+├── smoke.stderr.log
+└── runs/<run_id>/{run.json,events.jsonl}
+```
+
+`incident.json` 是当前快照，嵌入 FSM 状态、diagnosis、proposal metadata、apply receipt 和
+smoke 结果。`run.json` 只保存本轮指令、证据引用、字节指标和结构化结果；完整训练日志、完整
+tool output 和逐 token 文本不会重复写入。旧 `~/.cyan/sessions` 不迁移、不读取。
+
+## 可选 Smoke Verifier
 
 在训练项目根目录创建：
 
@@ -102,80 +118,26 @@ argv = ["python", "smoke_train.py", "--steps", "2"]
 timeout_s = 300
 ```
 
-smoke 由用户声明，不由 Agent 生成或修改。smoke 失败时，cyan 只在目标仍保持 apply 后哈希
-时反向应用补丁；最终真值始终是原训练命令的真实退出码。
+Smoke 由用户声明，Agent 不能修改。Smoke 失败时，仅在目标仍保持 apply 后哈希时反向应用补丁；
+最终真值始终是原训练命令的真实退出码。
 
 ## 架构
 
 ```text
-cyan / cyan-tui / cyan VS Code
+cyan / cyan VS Code
     │ TCP loopback + NDJSON + JSON-RPC 2.0
 cyan-core
-    ├── service/       daemon, protocol, transport
-    ├── agent/         AgentRunner, EventBus, ToolRegistry, SessionManager
-    └── training/      JobSupervisor, JobStore, IncidentCoordinator
+    ├── service/    daemon、协议、传输
+    ├── agent/      AgentRunner、AgentLoop、EventBus、ToolRegistry
+    └── training/   JobSupervisor、JobStore、IncidentCoordinator/Runtime
 ```
 
-原始进程输出只写 attempt 日志；TUI 按 byte cursor 读取。`launch.json` 为 `0600`，不会通过
-RPC 返回或暴露给 Agent。附着已有 Attempt 时显示有界日志尾部并从该 cursor 继续，完整日志
-仍保留在磁盘。IPC 客户端使用独立有界队列，慢客户端不会阻塞训练日志落盘。daemon 配置在
-启动时固定；切换依赖不同项目配置的 workspace 前需要重启 daemon。
+协议版本为 `2`。变更协议模型后运行：
 
-### Incident 状态机
-
-状态流转由 `src/cyan/training/incidents/fsm.py` 的声明式转移表作为单一事实源；该图由
-`fsm.render_mermaid()` 从同一张表生成，运行时校验、文档与测试永不漂移：
-
-```mermaid
-stateDiagram-v2
-    [*] --> diagnosing
-
-    diagnosing --> awaiting_approval: INVESTIGATION_DONE
-    diagnosing --> unresolved: INVESTIGATION_FAILED
-
-    awaiting_approval --> applying: APPROVE
-    awaiting_approval --> stale: APPROVE_INVALIDATED
-    awaiting_approval --> rejected: REJECT
-    awaiting_approval --> diagnosing: FOLLOW_UP
-
-    applying --> smoke_running: APPLY_OK_SMOKE
-    applying --> smoke_skipped: APPLY_OK_NO_SMOKE
-    applying --> stale: APPLY_FAILED
-    applying --> diagnosing: SMOKE_FAILED_ROLLED_BACK
-    applying --> rollback_blocked: SMOKE_FAILED_ROLLBACK_BLOCKED
-
-    smoke_running --> smoke_passed: SMOKE_PASSED
-    smoke_running --> diagnosing: SMOKE_FAILED_ROLLED_BACK
-    smoke_running --> rollback_blocked: SMOKE_FAILED_ROLLBACK_BLOCKED
-
-    smoke_passed --> retry_running: RETRY_STARTED
-    smoke_skipped --> retry_running: RETRY_STARTED
-
-    retry_running --> resolved: RETRY_SUCCEEDED
-    retry_running --> diagnosing: RETRY_FAILED
-    retry_running --> unresolved: RETRY_ABORTED
-
-    stale --> diagnosing: FOLLOW_UP
-    unresolved --> diagnosing: FOLLOW_UP
-    rollback_blocked --> diagnosing: FOLLOW_UP
-
-    resolved --> [*]
-    rejected --> [*]
+```bash
+uv run python scripts/gen_protocol_doc.py
+uv run python scripts/gen_protocol_doc.py --check
 ```
-
-## 当前验证范围
-
-当前本地 CPU/PyTorch Pilot 的最新回归结果为：
-
-- 非零退出侦测 18/18；
-- 根因与证据正确 18/18，长日志 6/6；
-- 可修补病例首次批准后原命令成功 11/12；
-- 非代码故障 6/6 未产生 proposal；
-- 批准前 tracked 写入和不可应用 proposal 到达审批均为 0。
-
-结果只证明 macOS、CPU、PyTorch 和明确异常退出场景，不外推到 CUDA、NCCL、多机训练、
-OOM、进程挂死、系统休眠或静默收敛故障。完整方法和限制见
-[USER_TEST_REPORT.md](USER_TEST_REPORT.md)。
 
 ## 开发验证
 
@@ -186,8 +148,8 @@ uv run pytest tests/unit -v
 uv run pytest tests/integration -v
 uv run pytest tests/ -v
 uv run python scripts/gen_protocol_doc.py --check
-cd vscode && npm run lint && npm run test:unit && npm run package
+cd vscode && npm run lint && npm run test:unit && npm run test:extension && npm run package
 ```
 
-协议见 [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md)，运维说明见 [RUNBOOK.md](RUNBOOK.md)，开发约束
-见 [AGENTS.md](AGENTS.md)。
+开发约束见 [AGENTS.md](AGENTS.md)，协议见 [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md)，VS Code 说明见
+[vscode/README.md](vscode/README.md)。

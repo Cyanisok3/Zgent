@@ -11,6 +11,9 @@ Thin local VS Code client for the cyan ML training Incident Agent.
 
 Set `cyan.executablePath` when `cyan` is not available on the VS Code extension host `PATH`.
 
+The client speaks Wire Protocol v2 and attaches to the daemon started by `cyan` or
+`cyan core start`; it does not start training or apply patches itself.
+
 ## Flow
 
 1. Open the ML project root and trust the workspace.

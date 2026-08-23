@@ -400,6 +400,7 @@ export class CyanController implements vscode.Disposable {
       await client.connect(endpoint.host, endpoint.port);
       const pong = await client.request<PongResult>("core.ping", {
         client: "cyan-vscode/0.0.1",
+        protocol_version: WIRE_PROTOCOL_VERSION,
       });
       if (pong.protocol_version !== WIRE_PROTOCOL_VERSION) {
         client.dispose();

@@ -136,5 +136,5 @@ def test_unknown_incident_key_is_rejected(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CYAN_CONFIG", str(config_path))
 
-    with pytest.raises(SystemExit, match=r"Unknown \[incident\] keys: somke"):
+    with pytest.raises(SystemExit, match=r"\[incident\] accepts only smoke"):
         get_config()

@@ -22,21 +22,20 @@
 
 ## daemon 与配置
 
-正常流程自动启动 daemon。开发诊断命令：
+正常流程自动启动 daemon。daemon 生命周期命令：
 
 ```bash
-uv run cyan core status
-uv run cyan core start
-uv run cyan core stop
-uv run cyan ping
+cyan core start [--json]
+cyan core stop
 ```
 
-daemon 默认监听 `127.0.0.1:7437`，拒绝非 loopback 地址，且 v1 不启动配置中的 MCP server。
+内部 daemon 入口是 `cyan-core`；`cyan` 会自动确保 daemon 启动后打开 TUI。daemon 默认监听
+`127.0.0.1:7437`，拒绝非 loopback 地址。协议版本为 v2。
 
 未设置 `CYAN_CONFIG` 时，配置优先级为：默认值、`~/.cyan/config.toml`、启动目录
 `.cyan/config.toml`、`.env`、系统环境变量；设置后只读取指定 TOML，再应用环境变量。常用
 变量为 `CYAN_CONFIG`、`CYAN_HOST`、`CYAN_PORT`、`CYAN_LOG_LEVEL`、`CYAN_LOG_FILE`、
-`CYAN_LLM_DEFAULT_MODEL` 和 `CYAN_PERMISSION_TIMEOUT_S`。
+`CYAN_LOG_FORMAT`、`CYAN_LLM_DEFAULT_MODEL`、`CYAN_TRACE_ENABLED` 和 `CYAN_TRACE_FILE`。
 
 daemon 只在启动时解析自身配置。之后从其他目录启动的 TUI 会复用它；若依赖另一项目的
 daemon/LLM 配置，应先停止并在新目录重启。Smoke 配置始终从 Job workspace 读取：
@@ -57,8 +56,10 @@ find ~/.cyan/jobs -maxdepth 4 -type f
 - `launch.json`：精确 argv/cwd/env，权限 `0600`，不得复制到 issue；
 - `attempts/*/{stdout,stderr}.log`：完整原始输出；
 - `failure.json`：失败时固定的 capsule；
-- `incidents/*/{diagnosis.json,proposal.diff}`：诊断和候选补丁；
-- `incidents/*/smoke-execution.json`：verifier PID 与进程身份；
+- `incidents/<incident_id>/incident.json`：Incident 当前快照，包含诊断、proposal、审批回执和验证结果；
+- `incidents/<incident_id>/proposal.diff`：存在候选补丁时才生成；
+- `incidents/<incident_id>/smoke.{stdout,stderr}.log`：运行 smoke 时才生成；
+- `incidents/<incident_id>/runs/<run_id>/{run.json,events.jsonl}`：单轮有限指标和摘要事件；
 - `traces/daemon.jsonl`：脱敏后的结构化 trace 摘要。
 
 ## Incident 状态

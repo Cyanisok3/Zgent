@@ -14,15 +14,14 @@ dependencies = [
     "pydantic>=2.0",       # 数据校验与序列化（含 JSON 模型等）
     "python-dotenv>=1.0",  # .env 文件解析
     "anthropic>=0.25",     # Anthropic LLM SDK（流式 + prompt caching）
-    "textual>=0.75",       # 终端 UI 框架（cyan-tui）
+    "textual>=0.75",       # 默认终端 UI 框架
     "httpx[socks]>=0.28.1",
 ]
 
-# 安装后可在 PATH 中执行的入口：`cyan` / `cyan-core` / `cyan-tui`
+# 安装后可在 PATH 中执行的入口：`cyan` / `cyan-core`
 [project.scripts]
 cyan = "cyan.cli.main:main"
 cyan-core = "cyan.service.app:run"
-cyan-tui = "cyan.tui.__main__:main"
 
 # ---- Hatch：打 wheel 时从 src 布局收录包 ----
 [tool.hatch.build.targets.wheel]
