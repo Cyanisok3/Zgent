@@ -84,3 +84,51 @@ def test_selector_is_deterministic_and_bounded(tmp_path: Path) -> None:
     assert first.selected_bytes <= 128
     assert len(first.content.encode("utf-8")) <= 128
     assert first.duplicates_removed >= 0
+
+
+# 功能：验证无 traceback 的具体 Python 异常名仍是 stderr 根因候选
+# 设计：用更长 stdout 制造竞争，断言 RuntimeError 不会被 stdout 尾部挤掉
+def test_selector_prefers_stderr_runtime_error_over_long_stdout(tmp_path: Path) -> None:
+    stdout = tmp_path / "stdout.log"
+    stderr = tmp_path / "stderr.log"
+    stdout.write_text("progress\n" * 4000, encoding="utf-8")
+    stderr.write_text("RuntimeError: optimizer exploded\n", encoding="utf-8")
+
+    selection = select_evidence(_capsule(tmp_path), stdout, stderr, max_bytes=256)
+
+    assert selection.references[0].source == "stderr"
+    assert selection.references[0].kind == "error_line"
+    assert "RuntimeError: optimizer exploded" in selection.content
+
+
+# 功能：验证超长单行日志仍能通过字节尾部回退选中
+# 设计：构造超过 8 KiB 的无换行 stdout，检查末尾标记和精确起点
+def test_selector_keeps_tail_of_oversized_single_line(tmp_path: Path) -> None:
+    stdout = tmp_path / "stdout.log"
+    stderr = tmp_path / "stderr.log"
+    stdout.write_bytes(b"x" * (12 * 1024) + b"FINAL_MARKER")
+    stderr.write_bytes(b"")
+
+    selection = select_evidence(_capsule(tmp_path), stdout, stderr, max_bytes=512)
+
+    assert "FINAL_MARKER" in selection.content
+    assert selection.references[0].start > 0
+
+
+# 功能：验证超预算 traceback 仍保留最终异常行
+# 设计：用大量 frame 耗尽 traceback 候选空间，断言终止 ValueError 优先存活
+def test_selector_reserves_budget_for_traceback_exception(tmp_path: Path) -> None:
+    stdout = tmp_path / "stdout.log"
+    stderr = tmp_path / "stderr.log"
+    stdout.write_bytes(b"")
+    stderr.write_text(
+        "Traceback (most recent call last):\n"
+        + "".join(f"  File '/outside/frame_{index}.py', line 1\n" for index in range(1000))
+        + "ValueError: final root cause\n",
+        encoding="utf-8",
+    )
+
+    selection = select_evidence(_capsule(tmp_path), stdout, stderr, max_bytes=256)
+
+    assert "ValueError: final root cause" in selection.content
+    assert any(item.kind == "traceback_exception" for item in selection.references)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Literal
@@ -51,23 +50,73 @@ class _Candidate:
 
 
 _TRACEBACK = b"Traceback (most recent call last):"
-_ERROR_LINE = re.compile(rb"\b(?:Error|Exception|Fatal)\b")
+_ERROR_LINE = re.compile(
+    rb"(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)|Fatal)(?::|\b)"
+)
 _FRAME = re.compile(rb"File [\"\']([^\"\']+)[\"\']")
 _TAIL_BYTES = 8 * 1024
 _MAX_BLOCK_BYTES = 32 * 1024
 
 
-# 扫描单个日志文件并只保留有限候选块、尾部和哈希
+# 从文件末尾按字节读取有界回退证据
+def _tail_candidate(
+    path: Path,
+    source: Literal["stdout", "stderr"],
+    total: int,
+) -> _Candidate | None:
+    if total <= 0 or not path.exists():
+        return None
+    start = max(0, total - _TAIL_BYTES)
+    with path.open("rb") as handle:
+        handle.seek(start)
+        content = handle.read(_TAIL_BYTES)
+    return _Candidate(
+        source,
+        start,
+        start + len(content),
+        "tail",
+        "stderr tail" if source == "stderr" else "stdout tail fallback",
+        content,
+        5 if source == "stderr" else 6,
+    )
+
+
+# 扫描单个日志并只保留最新的结构化候选、字节数和哈希
 def _scan(
     path: Path, source: Literal["stdout", "stderr"], workspace: str
 ) -> tuple[list[_Candidate], int, str]:
-    candidates: list[_Candidate] = []
     digest = hashlib.sha256()
     total = 0
-    tail: deque[tuple[int, bytes]] = deque()
     traceback_start: int | None = None
     traceback_lines: list[tuple[int, bytes]] = []
+    traceback_bytes = 0
     latest_traceback: _Candidate | None = None
+    traceback_exception: _Candidate | None = None
+    current_exception: _Candidate | None = None
+    latest_error: _Candidate | None = None
+    latest_frame: _Candidate | None = None
+
+    # 将当前 traceback 收口为最新完整块和终止异常行
+    def finish_traceback() -> None:
+        nonlocal latest_traceback, traceback_exception
+        nonlocal traceback_start, traceback_lines, traceback_bytes, current_exception
+        if traceback_start is not None and traceback_lines:
+            block = b"".join(item[1] for item in traceback_lines)
+            latest_traceback = _Candidate(
+                source,
+                traceback_start,
+                traceback_start + len(block),
+                "traceback",
+                "latest complete Python traceback",
+                block,
+                1,
+            )
+            traceback_exception = current_exception
+        traceback_start = None
+        traceback_lines = []
+        traceback_bytes = 0
+        current_exception = None
+
     handle: BinaryIO = path.open("rb") if path.exists() else _empty_stream()
     with handle:
         while True:
@@ -77,78 +126,63 @@ def _scan(
                 break
             total += len(line)
             digest.update(line)
-            tail.append((line_start, line))
-            while sum(len(item[1]) for item in tail) > _TAIL_BYTES:
-                tail.popleft()
             if _TRACEBACK in line:
+                finish_traceback()
                 traceback_start = line_start
                 traceback_lines = [(line_start, line)]
+                traceback_bytes = len(line)
                 continue
             if traceback_start is not None:
-                if (
-                    line.strip()
-                    and sum(len(item[1]) for item in traceback_lines) < _MAX_BLOCK_BYTES
-                ):
-                    traceback_lines.append((line_start, line))
-                if not line.strip() or total - line_start > _MAX_BLOCK_BYTES:
-                    block = b"".join(item[1] for item in traceback_lines)
-                    if block:
-                        latest_traceback = _Candidate(
-                            source,
-                            traceback_start,
-                            traceback_start + len(block),
-                            "traceback",
-                            "latest complete Python traceback",
-                            block,
-                            1,
-                        )
-                    traceback_start = None
-                    traceback_lines = []
-            if _ERROR_LINE.search(line):
-                candidates.append(
-                    _Candidate(
-                        source, line_start, total, "error_line", "latest error/fatal line", line, 3
-                    )
-                )
-            frame = _FRAME.search(line)
-            if frame is not None and workspace.encode() in frame.group(1):
-                candidates.append(
-                    _Candidate(
+                if line.strip() and traceback_bytes < _MAX_BLOCK_BYTES:
+                    remaining = _MAX_BLOCK_BYTES - traceback_bytes
+                    piece = line[:remaining]
+                    traceback_lines.append((line_start, piece))
+                    traceback_bytes += len(piece)
+                if _ERROR_LINE.search(line):
+                    current_exception = _Candidate(
                         source,
                         line_start,
                         total,
-                        "workspace_frame",
-                        "workspace traceback frame",
+                        "traceback_exception",
+                        "traceback final exception line",
                         line,
                         2,
                     )
+                if not line.strip():
+                    finish_traceback()
+            if source == "stderr" and _ERROR_LINE.search(line):
+                latest_error = _Candidate(
+                    source,
+                    line_start,
+                    total,
+                    "error_line",
+                    "latest stderr error/exception/fatal line",
+                    line,
+                    4,
                 )
-    if traceback_start is not None and traceback_lines:
-        block = b"".join(item[1] for item in traceback_lines)
-        latest_traceback = _Candidate(
-            source,
-            traceback_start,
-            traceback_start + len(block),
-            "traceback",
-            "latest complete Python traceback",
-            block,
-            1,
+            frame = _FRAME.search(line)
+            if frame is not None and workspace.encode() in frame.group(1):
+                latest_frame = _Candidate(
+                    source,
+                    line_start,
+                    total,
+                    "workspace_frame",
+                    "workspace traceback frame",
+                    line,
+                    3,
+                )
+    finish_traceback()
+    candidates = [
+        item
+        for item in (
+            latest_traceback,
+            traceback_exception,
+            latest_frame,
+            latest_error,
+            _tail_candidate(path, source, total),
         )
-    if latest_traceback is not None:
-        candidates.append(latest_traceback)
-    if tail:
-        start = tail[0][0]
-        candidates.append(
-            _Candidate(
-                source,
-                start,
-                total,
-                "tail",
-                "log tail fallback",
-                b"".join(item[1] for item in tail),
-                5,
-            )
-        )
+        if item is not None
+    ]
     return candidates, total, digest.hexdigest()
 
 
@@ -157,6 +191,15 @@ def _empty_stream() -> BinaryIO:
     from io import BytesIO
 
     return BytesIO()
+
+
+# 将候选渲染为带稳定字节范围的上下文块
+def _render(candidate: _Candidate, content: bytes) -> str:
+    return (
+        f"[{candidate.source} bytes={candidate.start}-"
+        f"{candidate.start + len(content)} kind={candidate.kind}]\n"
+        f"{content.decode('utf-8', errors='replace').rstrip(chr(10))}"
+    )
 
 
 # 对两个不可变日志做固定优先级、可复现的有限证据选择
@@ -183,37 +226,61 @@ def select_evidence(
         if candidate.content in seen:
             duplicates += 1
             continue
-        if selected_size >= max_bytes:
-            break
-        content = candidate.content[: max_bytes - selected_size]
-        while content:
-            block = (
-                f"[{candidate.source} bytes={candidate.start}-"
-                f"{candidate.start + len(content)} kind={candidate.kind}]\n"
-                f"{content.decode('utf-8', errors='replace').rstrip(chr(10))}"
+        reserved = 0
+        if candidate.kind == "traceback":
+            exception = next(
+                (
+                    item
+                    for item in candidates
+                    if item.kind == "traceback_exception" and item.source == candidate.source
+                ),
+                None,
             )
-            if len("\n".join([*rendered, block]).encode("utf-8")) <= max_bytes:
+            if exception is not None and exception.content not in seen:
+                reserved = len(_render(exception, exception.content).encode("utf-8")) + 1
+        available = max_bytes - reserved
+        if len("\n".join(rendered).encode("utf-8")) >= available:
+            if candidate.kind == "traceback":
+                continue
+            break
+        content = candidate.content
+        content_start = candidate.start
+        while content:
+            render_candidate = _Candidate(
+                candidate.source,
+                content_start,
+                content_start + len(content),
+                candidate.kind,
+                candidate.reason,
+                content,
+                candidate.priority,
+            )
+            block = _render(render_candidate, content)
+            if len("\n".join([*rendered, block]).encode("utf-8")) <= available:
                 break
-            overflow = len("\n".join([*rendered, block]).encode("utf-8")) - max_bytes
-            content = content[: max(0, len(content) - max(1, overflow))]
+            overflow = len("\n".join([*rendered, block]).encode("utf-8")) - available
+            remove = min(len(content), max(1, overflow))
+            if candidate.kind == "tail":
+                content = content[remove:]
+                content_start += remove
+            else:
+                content = content[: len(content) - remove]
         if not content:
+            if candidate.kind == "traceback":
+                continue
             break
         seen.add(candidate.content)
         selected_candidate = _Candidate(
             candidate.source,
-            candidate.start,
-            candidate.start + len(content),
+            content_start,
+            content_start + len(content),
             candidate.kind,
             candidate.reason,
             content,
             candidate.priority,
         )
         selected.append(selected_candidate)
-        rendered.append(
-            f"[{candidate.source} bytes={candidate.start}-"
-            f"{candidate.start + len(content)} kind={candidate.kind}]\n"
-            f"{content.decode('utf-8', errors='replace').rstrip(chr(10))}"
-        )
+        rendered.append(_render(selected_candidate, content))
         selected_size += len(content)
     references = [
         EvidenceReference(
