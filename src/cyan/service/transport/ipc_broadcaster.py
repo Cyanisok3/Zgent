@@ -39,6 +39,7 @@ class _Subscription:
     scope: str
     queue: asyncio.Queue[_QueuedEvent]
     write_lock: asyncio.Lock
+    ready: asyncio.Event
     task: asyncio.Task[None] | None = None
 
 
@@ -61,15 +62,29 @@ class IpcEventBroadcaster:
         writer: asyncio.StreamWriter,
         topics: list[str],
         scope: str = "global",
+        *,
+        replay_pending: bool = False,
     ) -> str:
+        family = self._scope_family(scope)
+        existing = [item for item in self._subscriptions if item.writer is writer]
+        write_lock = existing[0].write_lock if existing else asyncio.Lock()
+        replaced = [item for item in existing if self._scope_family(item.scope) == family]
+        self._subscriptions = [item for item in self._subscriptions if item not in replaced]
+        for item in replaced:
+            if item.task is not None:
+                item.task.cancel()
         sub_id = f"sub-{uuid.uuid4().hex[:8]}"
+        ready = asyncio.Event()
+        if not replay_pending:
+            ready.set()
         sub = _Subscription(
             sub_id=sub_id,
             writer=writer,
             topics=topics,
             scope=scope,
             queue=asyncio.Queue(maxsize=self._queue_size),
-            write_lock=asyncio.Lock(),
+            write_lock=write_lock,
+            ready=ready,
         )
         sub.task = asyncio.create_task(
             self._write_loop(sub),
@@ -78,9 +93,21 @@ class IpcEventBroadcaster:
         self._subscriptions.append(sub)
         return sub_id
 
+    # 允许指定订阅在历史回放完成后开始写实时队列
+    def activate(self, subscription_id: str) -> None:
+        sub = next(
+            (item for item in self._subscriptions if item.sub_id == subscription_id),
+            None,
+        )
+        if sub is not None:
+            sub.ready.set()
+
     # 在实时事件之前按历史顺序写入订阅回放，避免同一 writer 并发交错
-    async def replay(self, writer: asyncio.StreamWriter, events: list[dict[str, object]]) -> int:
-        sub = next((item for item in self._subscriptions if item.writer is writer), None)
+    async def replay(self, subscription_id: str, events: list[dict[str, object]]) -> int:
+        sub = next(
+            (item for item in self._subscriptions if item.sub_id == subscription_id),
+            None,
+        )
         if sub is None:
             return 0
         count = 0
@@ -94,14 +121,14 @@ class IpcEventBroadcaster:
                         event_type=event_type,
                         run_id=str(run_id) if run_id is not None else None,
                     )
-                    writer.write(item.payload)
-                    await writer.drain()
+                    sub.writer.write(item.payload)
+                    await sub.writer.drain()
                     self._trace_push(sub, item)
                     count += 1
         except (ConnectionResetError, BrokenPipeError, OSError):
-            self._remove_writer(writer, skip_task=asyncio.current_task())
+            self._remove_writer(sub.writer, skip_task=asyncio.current_task())
             try:
-                writer.close()
+                sub.writer.close()
             except Exception:
                 pass
         return count
@@ -152,6 +179,7 @@ class IpcEventBroadcaster:
     # 按队列顺序向单个订阅写事件，连接失败时清理该 writer 的全部订阅
     async def _write_loop(self, sub: _Subscription) -> None:
         try:
+            await sub.ready.wait()
             while True:
                 item = await sub.queue.get()
                 try:
@@ -246,3 +274,12 @@ class IpcEventBroadcaster:
         if scope.startswith("job:"):
             return job_id == scope[4:]
         return False
+
+    # 将订阅范围归并为 global、job 或 run 三类替换单元
+    @staticmethod
+    def _scope_family(scope: str) -> str:
+        if scope.startswith("job:"):
+            return "job"
+        if scope.startswith("run:"):
+            return "run"
+        return "global"

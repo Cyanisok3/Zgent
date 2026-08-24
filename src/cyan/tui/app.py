@@ -521,7 +521,7 @@ class CyanTuiApp(App[None]):
         self._can_apply = True
         self._awaiting_approval = False
         self._cancel_in_flight = False
-        self._subscribed_run_ids: set[str] = set()
+        self._active_run_id: str | None = None
         self._run_subscription_lock = asyncio.Lock()
         self._shown_diagnosis_id: str | None = None
         self._shown_proposal_id: str | None = None
@@ -566,7 +566,7 @@ class CyanTuiApp(App[None]):
             try:
                 await client.connect()
                 self._client = client
-                self._subscribed_run_ids.clear()
+                self._active_run_id = None
                 client.on_event(self._handle_event)
                 event_task = asyncio.create_task(client.run_event_loop())
                 await client.send_command(
@@ -636,6 +636,10 @@ class CyanTuiApp(App[None]):
             self._shown_proposal_id = None
             self._shown_smoke = None
             self._shown_incident_status = None
+            self._active_run_id = None
+            self._pending_tool_blocks.clear()
+            self._agent_blocks.clear()
+            self._agent_texts.clear()
             self._tail_logs_on_next_attempt = tail_logs
         self._job_id = job_id
         self._skip_job_restore = False
@@ -804,23 +808,28 @@ class CyanTuiApp(App[None]):
             return
         async with self._run_subscription_lock:
             client = self._client
-            if client is None or run_id in self._subscribed_run_ids:
+            if client is None or run_id == self._active_run_id:
                 return
-            await client.send_command(
-                "event.subscribe",
-                {
-                    "topics": [
-                        "run.*",
-                        "step.*",
-                        "tool.*",
-                        "llm.*",
-                    ],
-                    "scope": f"run:{run_id}",
-                    "replay_from_run": run_id,
-                },
-            )
-            if client is self._client:
-                self._subscribed_run_ids.add(run_id)
+            previous_run_id = self._active_run_id
+            self._active_run_id = run_id
+            try:
+                await client.send_command(
+                    "event.subscribe",
+                    {
+                        "topics": [
+                            "run.*",
+                            "step.*",
+                            "tool.*",
+                            "llm.*",
+                        ],
+                        "scope": f"run:{run_id}",
+                        "replay_from_run": run_id,
+                    },
+                )
+            except (IpcError, RuntimeError, OSError):
+                if client is self._client and self._active_run_id == run_id:
+                    self._active_run_id = previous_run_id
+                raise
 
     # 在没有附着任务时展示项目级命令和监视入口
     def _render_idle_header(self) -> None:
@@ -1268,6 +1277,12 @@ class CyanTuiApp(App[None]):
     # 将 Incident Agent 的摘要事件追加到统一时间线
     async def _handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type", ""))
+        event_job_id = event.get("job_id")
+        if event_job_id is not None and str(event_job_id) != self._job_id:
+            return
+        if event_type.startswith(("run.", "step.", "tool.", "llm.")):
+            if str(event.get("run_id") or "") != self._active_run_id:
+                return
         if event_type.startswith("job."):
             seq = event.get("seq")
             if (

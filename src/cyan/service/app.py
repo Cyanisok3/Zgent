@@ -406,14 +406,25 @@ class CoreApp:
         cmd = EventSubscribeCommand.model_validate(params)
         writer = get_connection_writer()
         assert self._broadcaster is not None
-        subscription_id = self._broadcaster.subscribe(writer, cmd.topics, cmd.scope)
+        replay_pending = cmd.scope.startswith("job:") or cmd.replay_from_run is not None
+        subscription_id = self._broadcaster.subscribe(
+            writer,
+            cmd.topics,
+            cmd.scope,
+            replay_pending=replay_pending,
+        )
         replayed = 0
-        if cmd.scope.startswith("job:"):
-            replayed = await self._replay_job_events(
-                cmd.scope[4:], writer, cmd.topics, cmd.after_seq
-            )
-        elif cmd.replay_from_run is not None:
-            replayed = await self._replay_events(cmd.replay_from_run, writer, cmd.topics)
+        try:
+            if cmd.scope.startswith("job:"):
+                replayed = await self._replay_job_events(
+                    cmd.scope[4:], subscription_id, writer, cmd.topics, cmd.after_seq
+                )
+            elif cmd.replay_from_run is not None:
+                replayed = await self._replay_events(
+                    cmd.replay_from_run, subscription_id, writer, cmd.topics
+                )
+        finally:
+            self._broadcaster.activate(subscription_id)
         return EventSubscribeResult(subscription_id=subscription_id, replayed_count=replayed)
 
     # 将持久化 JobEvent 转换为总线事件
@@ -444,7 +455,12 @@ class CoreApp:
 
     # 回放 Job 局部事件流
     async def _replay_job_events(
-        self, job_id: str, writer: asyncio.StreamWriter, topics: list[str], after_seq: int
+        self,
+        job_id: str,
+        subscription_id: str,
+        writer: asyncio.StreamWriter,
+        topics: list[str],
+        after_seq: int,
     ) -> int:
         assert self._job_store is not None
         try:
@@ -467,7 +483,7 @@ class CoreApp:
             replay.append(canonical.model_dump(mode="json"))
             count += 1
         if self._broadcaster is not None:
-            await self._broadcaster.replay(writer, replay)
+            await self._broadcaster.replay(subscription_id, replay)
         elif count:
             for replay_event in replay:
                 writer.write(
@@ -478,7 +494,11 @@ class CoreApp:
 
     # 在所有 Incident run 目录中寻找并回放摘要事件
     async def _replay_events(
-        self, run_id: str, writer: asyncio.StreamWriter, topics: list[str]
+        self,
+        run_id: str,
+        subscription_id: str,
+        writer: asyncio.StreamWriter,
+        topics: list[str],
     ) -> int:
         assert self._job_store is not None
         paths = self._job_store._root.glob(f"*/incidents/*/runs/{run_id}/events.jsonl")
@@ -496,7 +516,7 @@ class CoreApp:
                 replay.append(event)
                 count += 1
         if self._broadcaster is not None:
-            await self._broadcaster.replay(writer, replay)
+            await self._broadcaster.replay(subscription_id, replay)
         elif count:
             for replay_event in replay:
                 writer.write(

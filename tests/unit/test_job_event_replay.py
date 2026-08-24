@@ -66,6 +66,7 @@ async def test_job_replay_uses_canonical_schema_and_cursor(tmp_path: Path) -> No
 
     count = await app._replay_job_events(
         job.id,
+        "unused-subscription",
         cast(asyncio.StreamWriter, writer),
         ["job.*"],
         0,
@@ -89,6 +90,7 @@ async def test_job_replay_uses_canonical_schema_and_cursor(tmp_path: Path) -> No
     writer.drain = AsyncMock()
     count = await app._replay_job_events(
         job.id,
+        "unused-subscription",
         cast(asyncio.StreamWriter, writer),
         ["job.finished"],
         1,

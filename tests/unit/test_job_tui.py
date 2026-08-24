@@ -169,6 +169,40 @@ async def test_active_run_subscription_is_idempotent() -> None:
     ]
 
 
+# 功能：验证 TUI 忽略旧 Job 和旧 Run 的迟到事件
+# 设计：注入当前标识后依次发送错误和正确事件，只允许当前 Run 渲染
+async def test_tui_ignores_late_events_from_previous_job_and_run() -> None:
+    app = CyanTuiApp("127.0.0.1", 7437, job_id="job-current")
+    app._active_run_id = "run-current"
+    rendered: list[str] = []
+    app._append_text = lambda content, style="": rendered.append(content)  # type: ignore[method-assign]
+
+    await app._handle_event(
+        {
+            "type": "job.started",
+            "job_id": "job-old",
+            "seq": 10,
+        }
+    )
+    await app._handle_event(
+        {
+            "type": "run.started",
+            "run_id": "run-old",
+        }
+    )
+    await app._handle_event(
+        {
+            "type": "run.started",
+            "run_id": "run-current",
+        }
+    )
+
+    assert app._job_event_seq == 0
+    assert rendered == ["Agent run: run-current"]
+    app._select_job("job-next")
+    assert app._active_run_id is None
+
+
 # 功能：验证 /monitor → 命令预览 → /start 复用 job.start
 # 设计：以假 RPC 记录真实解析后的 argv、workspace 和环境覆盖项
 async def test_monitor_preview_and_start(tmp_path: Path) -> None:

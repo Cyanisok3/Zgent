@@ -316,3 +316,80 @@ async def test_dead_connection_removed_after_failure() -> None:
     await broadcaster.handle(_run_started())
     await _flush_writer_tasks()
     writer.write.assert_not_called()  # type: ignore[attr-defined]
+
+
+# 功能：验证同一 writer 的新 Job 和 Run 订阅分别替换同类旧订阅
+# 设计：连续切换两个 Job 和两个 Run，发布新旧事件后只允许当前 scope 写出
+async def test_scope_family_subscription_replaces_previous_scope() -> None:
+    broadcaster = IpcEventBroadcaster()
+    writer = _make_writer()
+    broadcaster.subscribe(writer, ["job.*"], "job:j1")
+    broadcaster.subscribe(writer, ["job.*"], "job:j2")
+    broadcaster.subscribe(writer, ["run.*"], "run:r1")
+    broadcaster.subscribe(writer, ["run.*"], "run:r2")
+    base = {
+        "seq": 1,
+        "attempt_id": "a1",
+        "argv": ["python", "train.py"],
+        "workspace_root": "/tmp/project",
+        "ts": "2026-01-01T00:00:00Z",
+    }
+
+    await broadcaster.handle(JobStartedEvent(job_id="j1", **base))
+    await broadcaster.handle(JobStartedEvent(job_id="j2", **base))
+    await broadcaster.handle(_run_started("r1"))
+    await broadcaster.handle(_run_started("r2"))
+    await _flush_writer_tasks()
+
+    payloads = [
+        json.loads(call.args[0].rstrip(b"\n"))["event"]
+        for call in writer.write.call_args_list  # type: ignore[attr-defined]
+    ]
+    assert [(item.get("job_id"), item.get("run_id")) for item in payloads] == [
+        ("j2", None),
+        (None, "r2"),
+    ]
+    broadcaster.unsubscribe(writer)
+
+
+# 功能：验证同一 writer 的 Job 与 Run 订阅共用一把写锁
+# 设计：保留两个不同 scope family 并直接比较内部锁身份，锁定 NDJSON 单写者不变量
+async def test_same_writer_subscriptions_share_write_lock() -> None:
+    broadcaster = IpcEventBroadcaster()
+    writer = _make_writer()
+    broadcaster.subscribe(writer, ["job.*"], "job:j1")
+    broadcaster.subscribe(writer, ["run.*"], "run:r1")
+
+    assert len(broadcaster._subscriptions) == 2
+    assert broadcaster._subscriptions[0].write_lock is broadcaster._subscriptions[1].write_lock
+    broadcaster.unsubscribe(writer)
+
+
+# 功能：验证订阅回放完成前实时队列不会越过历史事件
+# 设计：先将 live 事件入队，再回放 history 并激活订阅，断言 writer 上的严格顺序
+async def test_replay_barrier_orders_history_before_live_event() -> None:
+    broadcaster = IpcEventBroadcaster()
+    writer = _make_writer()
+    subscription_id = broadcaster.subscribe(
+        writer,
+        ["run.*"],
+        "run:r1",
+        replay_pending=True,
+    )
+    await broadcaster.handle(_run_started("r1"))
+    await _flush_writer_tasks()
+    writer.write.assert_not_called()  # type: ignore[attr-defined]
+
+    await broadcaster.replay(
+        subscription_id,
+        [_run_started("history").model_dump(mode="json")],
+    )
+    broadcaster.activate(subscription_id)
+    await _flush_writer_tasks()
+
+    payloads = [
+        json.loads(call.args[0].rstrip(b"\n"))["event"]["run_id"]
+        for call in writer.write.call_args_list  # type: ignore[attr-defined]
+    ]
+    assert payloads == ["history", "r1"]
+    broadcaster.unsubscribe(writer)
