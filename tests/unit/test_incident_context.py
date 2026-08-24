@@ -9,7 +9,10 @@ from cyan.training.incidents.context import (
     build_incident_context,
 )
 from cyan.training.incidents.models import FailureCapsule, Incident, LogSnapshot
+from cyan.training.incidents.profile import build_incident_profile
 from cyan.training.incidents.selector import EvidenceSelection
+from cyan.training.incidents.store import IncidentStore
+from cyan.training.jobs.store import JobStore
 
 
 # 构造当前 Incident context 测试使用的失败胶囊
@@ -74,3 +77,50 @@ def test_incident_context_contains_only_bounded_inputs(tmp_path: Path) -> None:
     assert "session" not in context.system_prompt.lower()
     assert MAX_INPUT_BYTES == 128 * 1024
     assert MAX_INITIAL_EVIDENCE_BYTES == 32 * 1024
+
+
+# 功能：验证 Incident profile 拒绝仅格式合法但未被工具观测的源码引用
+# 设计：直接调用 profile 中的诊断工具，用伪造 SHA 证明统一登记表是唯一准入
+async def test_incident_profile_rejects_unobserved_workspace_reference(
+    tmp_path: Path,
+) -> None:
+    incident = _incident(tmp_path)
+    store = IncidentStore(tmp_path / "incidents")
+    store.write_incident(incident)
+    selection = EvidenceSelection(
+        content="",
+        references=[],
+        scanned_bytes=0,
+        selected_bytes=0,
+        duplicates_removed=0,
+        stdout_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        stderr_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    )
+    profile = build_incident_profile(
+        JobStore(tmp_path / "jobs"),
+        store,
+        incident,
+        _capsule(tmp_path),
+        selection,
+        "inspect",
+    )
+    tool = next(item for item in profile.tools if item.name == "submit_diagnosis")
+
+    result = await tool.invoke(
+        {
+            "category": "runtime",
+            "summary": "invented evidence",
+            "root_cause": "not actually observed",
+            "evidence": [
+                {
+                    "source": "workspace",
+                    "reference": f"train.py@sha256:{'a' * 64}#L1",
+                    "description": "syntactically valid but invented",
+                }
+            ],
+            "confidence": 0.5,
+        }
+    )
+
+    assert result.is_error
+    assert "was not observed" in result.content

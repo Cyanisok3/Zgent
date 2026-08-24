@@ -44,18 +44,20 @@ class MemoryLogReader:
 # 功能：验证 tail 模式最多返回 32 KiB 且标注精确字节范围
 # 设计：使用 40 KiB 单字节日志避开字符编码干扰，直接断言 start、end 和返回内容长度
 async def test_read_job_log_tail_is_bounded() -> None:
-    tool = ReadJobLogTool(MemoryLogReader(b"x" * (40 * 1024)))
+    tool = ReadJobLogTool(MemoryLogReader(b"x" * (40 * 1024)), "job-1", "attempt-1")
 
     result = await tool.invoke(
         {
-            "job_id": "job-1",
-            "attempt_id": "attempt-1",
             "stream": "stderr",
             "mode": "tail",
         }
     )
 
     payload = json.loads(result.content)
+    assert "job_id" not in tool.input_schema["properties"]
+    assert "attempt_id" not in tool.input_schema["properties"]
+    assert payload["job_id"] == "job-1"
+    assert payload["attempt_id"] == "attempt-1"
     assert payload["slice"]["start"] == 8 * 1024
     assert payload["slice"]["end"] == 40 * 1024
     assert len(payload["slice"]["content"].encode()) == 32 * 1024
@@ -64,12 +66,10 @@ async def test_read_job_log_tail_is_bounded() -> None:
 # 功能：验证 range 模式使用调用者给出的稳定 byte offset
 # 设计：读取中间四个字节并断言闭开区间，避免把字符行号误当成日志证据定位
 async def test_read_job_log_range_uses_byte_offsets() -> None:
-    tool = ReadJobLogTool(MemoryLogReader(b"0123456789"))
+    tool = ReadJobLogTool(MemoryLogReader(b"0123456789"), "job-1", "attempt-1")
 
     result = await tool.invoke(
         {
-            "job_id": "job-1",
-            "attempt_id": "attempt-1",
             "stream": "stdout",
             "mode": "range",
             "offset": 3,
@@ -85,12 +85,12 @@ async def test_read_job_log_range_uses_byte_offsets() -> None:
 # 设计：把查询串刻意放在 64 KiB 边界两侧，覆盖 overlap 算法而不暴露 reader 实现
 async def test_read_job_log_search_crosses_chunk_boundary() -> None:
     prefix = b"x" * (64 * 1024 - 3)
-    tool = ReadJobLogTool(MemoryLogReader(prefix + b"ERROR" + b"z" * 100))
+    tool = ReadJobLogTool(
+        MemoryLogReader(prefix + b"ERROR" + b"z" * 100), "job-1", "attempt-1"
+    )
 
     result = await tool.invoke(
         {
-            "job_id": "job-1",
-            "attempt_id": "attempt-1",
             "stream": "stderr",
             "mode": "search",
             "query": "ERROR",
@@ -109,12 +109,10 @@ async def test_read_job_log_search_crosses_chunk_boundary() -> None:
 async def test_read_job_log_search_only_reads_returned_evidence() -> None:
     marker_offset = 512 * 1024
     reader = MemoryLogReader(b"x" * marker_offset + b"ROOT_CAUSE" + b"z" * 1024)
-    tool = ReadJobLogTool(reader)
+    tool = ReadJobLogTool(reader, "job-1", "attempt-1")
 
     result = await tool.invoke(
         {
-            "job_id": "job-1",
-            "attempt_id": "attempt-1",
             "stream": "stderr",
             "mode": "search",
             "query": "ROOT_CAUSE",
@@ -131,12 +129,10 @@ async def test_read_job_log_search_only_reads_returned_evidence() -> None:
 # 功能：验证 search 未提供 query 时返回 schema_error
 # 设计：直接调用工具覆盖独立业务约束，确保没有空查询导致全日志扫描
 async def test_read_job_log_search_requires_query() -> None:
-    tool = ReadJobLogTool(MemoryLogReader(b"content"))
+    tool = ReadJobLogTool(MemoryLogReader(b"content"), "job-1", "attempt-1")
 
     result = await tool.invoke(
         {
-            "job_id": "job-1",
-            "attempt_id": "attempt-1",
             "stream": "stderr",
             "mode": "search",
         }

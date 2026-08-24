@@ -106,11 +106,11 @@ class IncidentCoordinator:
 
     # 更新状态并广播可重建的摘要事件
     async def _set_status(
-        self, store: IncidentStore, incident: Incident, status: IncidentStatus
-    ) -> None:
-        incident.status = status
-        incident.updated_at = _now()
-        store.write_incident(incident)
+        self, store: IncidentStore, incident_id: str, status: IncidentStatus
+    ) -> Incident:
+        incident = store.update_incident(
+            incident_id, lambda current: setattr(current, "status", status)
+        )
         await self._bus.publish(
             IncidentStatusChangedEvent(
                 job_id=incident.job_id,
@@ -119,14 +119,26 @@ class IncidentCoordinator:
                 ts=incident.updated_at.isoformat(),
             )
         )
+        return incident
 
     # 通过 FSM 校验事件、持久化目标状态并广播
     async def _dispatch(
-        self, store: IncidentStore, incident: Incident, event: Event
-    ) -> IncidentStatus:
-        next_status = transition(incident.status, event)
-        await self._set_status(store, incident, next_status)
-        return next_status
+        self, store: IncidentStore, incident_id: str, event: Event
+    ) -> Incident:
+        current = store.read_incident(incident_id)
+        next_status = transition(current.status, event)
+        return await self._set_status(store, incident_id, next_status)
+
+    # 只在已诊断、已提案且 Failure Capsule 属于 Git 工作区时允许应用
+    def _can_apply(self, incident: Incident) -> bool:
+        if incident.diagnosis is None or incident.proposal is None:
+            return False
+        try:
+            failure = self._jobs.read_failure(incident.job_id, incident.attempt_id)
+            capsule = FailureCapsule.model_validate(failure.capsule)
+        except (FileNotFoundError, OSError, ValueError):
+            return False
+        return capsule.git_head is not None
 
     # 在后台任务启动前原子写入本轮 run.json
     def _start_run(
@@ -152,9 +164,10 @@ class IncidentCoordinator:
                 else previous_outcome_summary
             ),
         )
-        incident.active_run_id = run.run_id
-        incident.updated_at = _now()
-        store.write_incident(incident)
+        store.update_incident(
+            incident.id,
+            lambda current: setattr(current, "active_run_id", run.run_id),
+        )
         self._spawn(
             self._run_diagnosis(store, incident.id, run.run_id),
             f"incident-run-{incident.id}-{run.run_id}",
@@ -194,7 +207,7 @@ class IncidentCoordinator:
                 store.write_incident(current)
                 store.clear_agent_artifacts(current.id)
                 current = store.read_incident(current.id)
-                await self._dispatch(store, current, Event.RETRY_FAILED)
+                current = await self._dispatch(store, current.id, Event.RETRY_FAILED)
                 self._start_run(
                     store,
                     current,
@@ -257,20 +270,25 @@ class IncidentCoordinator:
         current = store.read_incident(incident_id)
         if outcome is None or current.diagnosis is None:
             if current.status == "diagnosing":
-                await self._dispatch(store, current, Event.INVESTIGATION_FAILED)
+                await self._dispatch(store, current.id, Event.INVESTIGATION_FAILED)
             return
         if current.proposal is None:
             if current.status == "diagnosing":
-                await self._dispatch(store, current, Event.INVESTIGATION_FAILED)
+                await self._dispatch(store, current.id, Event.INVESTIGATION_FAILED)
             return
-        current.active_proposal_id = current.proposal.id
-        await self._dispatch(store, current, Event.INVESTIGATION_DONE)
+        proposal = current.proposal
+        diagnosis = current.diagnosis
+        current = store.update_incident(
+            current.id,
+            lambda incident: setattr(incident, "active_proposal_id", proposal.id),
+        )
+        current = await self._dispatch(store, current.id, Event.INVESTIGATION_DONE)
         await self._bus.publish(
             PatchProposedEvent(
                 job_id=current.job_id,
                 incident_id=current.id,
-                proposal_id=current.proposal.id,
-                summary=current.diagnosis.summary,
+                proposal_id=proposal.id,
+                summary=diagnosis.summary,
                 ts=_now().isoformat(),
             )
         )
@@ -331,9 +349,7 @@ class IncidentCoordinator:
                     if incident.smoke_result
                     else None
                 ),
-                "can_apply": bool(
-                    incident.diagnosis and incident.proposal and incident.workspace_root
-                ),
+                "can_apply": self._can_apply(incident),
             }
         )
         return view
@@ -378,38 +394,47 @@ class IncidentCoordinator:
             if incident.active_proposal_id != proposal_id or incident.proposal is None:
                 raise ValueError("proposal is not active")
             if decision == "reject":
-                await self._dispatch(store, incident, Event.REJECT)
+                incident = await self._dispatch(store, incident.id, Event.REJECT)
                 return incident.status
+            if not self._can_apply(incident):
+                raise ValueError("proposal is review-only and cannot be applied")
+            proposal = incident.proposal
+            assert proposal is not None
             spec = self._jobs.read_spec(incident.job_id)
             smoke_config: SmokeVerifierConfig | None = None
             if run_smoke:
                 smoke_config = load_smoke_verifier(spec.workspace_root)
                 observed = smoke_verifier_fingerprint(smoke_config) if smoke_config else None
                 if observed != smoke_config_fingerprint:
-                    await self._dispatch(store, incident, Event.APPROVE_INVALIDATED)
+                    incident = await self._dispatch(
+                        store, incident.id, Event.APPROVE_INVALIDATED
+                    )
                     return incident.status
-            await self._dispatch(store, incident, Event.APPROVE)
+            incident = await self._dispatch(store, incident.id, Event.APPROVE)
             patch_service = PatchService(spec.workspace_root)
             try:
                 receipt = await patch_service.apply(
-                    incident.proposal, store.patch_path(incident.proposal)
+                    proposal, store.patch_path(proposal)
                 )
             except (OSError, PatchError, ValueError):
-                await self._dispatch(store, incident, Event.APPLY_FAILED)
+                incident = await self._dispatch(store, incident.id, Event.APPLY_FAILED)
                 return incident.status
             store.write_receipt(incident.id, receipt)
+            incident = store.read_incident(incident.id)
             if run_smoke and smoke_config is not None:
                 if not await self._run_smoke(
                     store, incident, proposal_id, smoke_config, patch_service
                 ):
                     return store.read_incident(incident.id).status
             else:
-                await self._dispatch(store, incident, Event.APPLY_OK_NO_SMOKE)
-            await self._dispatch(store, incident, Event.RETRY_STARTED)
+                incident = await self._dispatch(
+                    store, incident.id, Event.APPLY_OK_NO_SMOKE
+                )
+            incident = await self._dispatch(store, incident.id, Event.RETRY_STARTED)
             try:
                 retry_job = await self._supervisor.retry(incident.job_id)
             except RuntimeError:
-                await self._dispatch(store, incident, Event.RETRY_ABORTED)
+                incident = await self._dispatch(store, incident.id, Event.RETRY_ABORTED)
                 return incident.status
             if retry_job.status == "running" and retry_job.current_attempt_id:
                 persisted = self._jobs.find_attempt_event(
@@ -427,7 +452,7 @@ class IncidentCoordinator:
                         )
                     )
             self._spawn(self._observe_retry(store, incident.id), f"incident-verify-{incident.id}")
-            return incident.status
+            return store.read_incident(incident.id).status
 
     # 执行 Smoke 并在失败且哈希安全时回滚
     async def _run_smoke(
@@ -448,7 +473,7 @@ class IncidentCoordinator:
                     status="running", pid=pid, process_identity=process_identity, started_at=_now()
                 ),
             )
-            await self._dispatch(store, store.read_incident(incident.id), Event.APPLY_OK_SMOKE)
+            await self._dispatch(store, incident.id, Event.APPLY_OK_SMOKE)
 
         try:
             result = await self._smoke.run(
@@ -486,23 +511,23 @@ class IncidentCoordinator:
             )
         )
         if result.status == "passed":
-            await self._dispatch(store, store.read_incident(incident.id), Event.SMOKE_PASSED)
+            await self._dispatch(store, incident.id, Event.SMOKE_PASSED)
             return True
         current = store.read_incident(incident.id)
         if current.proposal is None or current.apply_receipt is None:
-            await self._dispatch(store, current, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
+            await self._dispatch(store, current.id, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
             return False
         try:
             await patch_service.reverse(
                 current.proposal, store.patch_path(current.proposal), current.apply_receipt
             )
         except (OSError, PatchError, ValueError):
-            await self._dispatch(store, current, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
+            await self._dispatch(store, current.id, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
             return False
         previous = self._previous_outcome(current)
         store.clear_agent_artifacts(incident.id)
         current = store.read_incident(incident.id)
-        await self._dispatch(store, current, Event.SMOKE_FAILED_ROLLED_BACK)
+        current = await self._dispatch(store, current.id, Event.SMOKE_FAILED_ROLLED_BACK)
         self._start_run(
             store,
             current,
@@ -541,7 +566,7 @@ class IncidentCoordinator:
                 stderr_path=directory / "smoke.stderr.log",
             ),
         )
-        await self._set_status(store, store.read_incident(incident.id), "unresolved")
+        await self._set_status(store, incident.id, "unresolved")
 
     # 等待重跑结束，以真实退出码决定 resolved 或由失败回调继续调查
     async def _observe_retry(self, store: IncidentStore, incident_id: str) -> None:
@@ -570,15 +595,15 @@ class IncidentCoordinator:
                 )
         current = store.read_incident(incident_id)
         if job.status == "succeeded" and current.status == "retry_running":
-            await self._dispatch(store, current, Event.RETRY_SUCCEEDED)
+            await self._dispatch(store, current.id, Event.RETRY_SUCCEEDED)
         elif job.status in ("cancelled", "interrupted") and current.status == "retry_running":
-            await self._dispatch(store, current, Event.RETRY_ABORTED)
+            await self._dispatch(store, current.id, Event.RETRY_ABORTED)
         elif (
             job.status == "failed"
             and (attempt is None or attempt.returncode is None)
             and current.status == "retry_running"
         ):
-            await self._dispatch(store, current, Event.RETRY_ABORTED)
+            await self._dispatch(store, current.id, Event.RETRY_ABORTED)
 
     # 接收明确的 Incident 追问，并创建新的独立 run
     async def follow_up(self, incident_id: str, content: str) -> str:
@@ -590,7 +615,7 @@ class IncidentCoordinator:
             previous = self._previous_outcome(incident)
             store.clear_agent_artifacts(incident.id)
             incident = store.read_incident(incident.id)
-            await self._dispatch(store, incident, Event.FOLLOW_UP)
+            incident = await self._dispatch(store, incident.id, Event.FOLLOW_UP)
             return self._start_run(
                 store,
                 store.read_incident(incident.id),
@@ -649,8 +674,11 @@ class IncidentCoordinator:
                     continue
                 action = recover_action(incident.status)
                 if action == "quarantine":
-                    incident.active_proposal_id = None
-                    await self._set_status(store, incident, "unresolved")
+                    store.update_incident(
+                        incident.id,
+                        lambda current: setattr(current, "active_proposal_id", None),
+                    )
+                    await self._set_status(store, incident.id, "unresolved")
                 elif (
                     incident.status == "awaiting_approval"
                     and incident.proposal is not None
@@ -666,12 +694,12 @@ class IncidentCoordinator:
                             instruction="Resume the interrupted incident investigation.",
                         )
                 elif incident.status == "retry_running" and job.status == "succeeded":
-                    await self._set_status(store, incident, "resolved")
+                    await self._set_status(store, incident.id, "resolved")
                 elif incident.status == "retry_running" and job.status not in (
                     "starting",
                     "running",
                 ):
-                    await self._set_status(store, incident, "unresolved")
+                    await self._set_status(store, incident.id, "unresolved")
 
     # 取消仍在后台的 Incident Runtime 和重跑观察任务
     async def close(self) -> None:

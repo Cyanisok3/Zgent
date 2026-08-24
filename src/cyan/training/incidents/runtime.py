@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-from pathlib import Path
 
 from cyan.agent.events.bus import EventBus
 from cyan.agent.llm.base import LLMProvider
@@ -10,21 +8,11 @@ from cyan.agent.runner import AgentRunner, RunOutcome
 from cyan.agent.trace.writer import TraceWriter
 from cyan.config import CyanConfig
 from cyan.training.incidents.context import MAX_INITIAL_EVIDENCE_BYTES
-from cyan.training.incidents.evidence import build_failure_capsule
+from cyan.training.incidents.models import FailureCapsule
 from cyan.training.incidents.profile import build_incident_profile
 from cyan.training.incidents.selector import select_evidence
 from cyan.training.incidents.store import IncidentRun, IncidentStore
 from cyan.training.jobs.store import JobStore
-
-
-# 计算不可变日志当前 SHA-256，恢复前用于拒绝替换过的证据
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    if path.exists():
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                digest.update(chunk)
-    return digest.hexdigest()
 
 
 class IncidentRuntime:
@@ -50,21 +38,18 @@ class IncidentRuntime:
     async def run(self, incident_id: str, run_id: str) -> RunOutcome:
         incident = self._store.read_incident(incident_id)
         run = self._store.read_run(incident_id, run_id)
-        failure = self._jobs.read_failure(incident.job_id, incident.attempt_id)
-        capsule = await build_failure_capsule(self._jobs, failure)
+        try:
+            failure = self._jobs.read_failure(incident.job_id, incident.attempt_id)
+            capsule = FailureCapsule.model_validate(failure.capsule)
+        except (FileNotFoundError, OSError, ValueError):
+            def mark_capsule_unavailable(current: IncidentRun) -> None:
+                current.status = "failed"
+                current.reason = "failure_capsule_unavailable"
+
+            self._store.update_run(incident_id, run_id, mark_capsule_unavailable)
+            return RunOutcome("failed", "", "failure_capsule_unavailable")
         stdout_path = self._jobs.log_path(incident.job_id, incident.attempt_id, "stdout")
         stderr_path = self._jobs.log_path(incident.job_id, incident.attempt_id, "stderr")
-        if (
-            _sha256(stdout_path) != capsule.stdout.sha256
-            or _sha256(stderr_path) != capsule.stderr.sha256
-        ):
-            def mark_log_changed(current: IncidentRun) -> None:
-                current.status = "failed"
-                current.reason = "log_changed"
-
-            self._store.update_run(incident_id, run_id, mark_log_changed)
-            return RunOutcome("failed", "", "log_changed")
-
         selection = await asyncio.to_thread(
             select_evidence,
             capsule,
@@ -72,6 +57,16 @@ class IncidentRuntime:
             stderr_path,
             MAX_INITIAL_EVIDENCE_BYTES,
         )
+        if (
+            selection.stdout_sha256 != capsule.stdout.sha256
+            or selection.stderr_sha256 != capsule.stderr.sha256
+        ):
+            def mark_log_changed(current: IncidentRun) -> None:
+                current.status = "failed"
+                current.reason = "log_changed"
+
+            self._store.update_run(incident_id, run_id, mark_log_changed)
+            return RunOutcome("failed", "", "log_changed")
         refs = [
             {
                 "source": item.source,

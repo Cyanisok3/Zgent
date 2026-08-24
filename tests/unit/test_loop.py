@@ -212,6 +212,20 @@ async def test_llm_api_error_marks_failed() -> None:
     assert ctx.reason == "llm_error"
 
 
+# 功能：验证初始上下文超限时在 provider 调用前终止
+# 设计：让 provider 一旦被调用就抛错，用极小预算断言结果仍是预算失败
+async def test_initial_context_budget_stops_before_provider() -> None:
+    provider = _MockProvider([], exc=AssertionError("provider must not be called"))
+    loop, _ = _make_loop(provider)
+    ctx = _ctx()
+    ctx.max_input_bytes = 1
+
+    await loop.run(ctx)
+
+    assert ctx.status == "failed"
+    assert ctx.reason == "context_budget_exhausted"
+
+
 # 功能：验证每个步骤都发布 step.started 和 step.finished 事件
 # 设计：注入 bus + 事件收集器，检查事件类型集合，确认步骤级事件的可观测性（S2 TUI 依赖这两个事件显示进度）
 async def test_step_started_and_finished_events_published() -> None:

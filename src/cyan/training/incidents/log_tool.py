@@ -100,8 +100,6 @@ class FileJobLogReader:
 class ReadJobLogParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    job_id: str = Field(min_length=1, max_length=128)
-    attempt_id: str = Field(min_length=1, max_length=128)
     stream: LogStream
     mode: LogMode = "tail"
     offset: int = Field(default=0, ge=0)
@@ -141,8 +139,6 @@ class ReadJobLogTool(BaseTool):
     input_schema: dict[str, object] = {
         "type": "object",
         "properties": {
-            "job_id": {"type": "string"},
-            "attempt_id": {"type": "string"},
             "stream": {"type": "string", "enum": ["stdout", "stderr"]},
             "mode": {"type": "string", "enum": ["tail", "range", "search"]},
             "offset": {"type": "integer", "minimum": 0},
@@ -153,17 +149,21 @@ class ReadJobLogTool(BaseTool):
             },
             "query": {"type": "string"},
         },
-        "required": ["job_id", "attempt_id", "stream"],
+        "required": ["stream"],
     }
 
     # 使用注入的日志 reader 初始化只读工具
     def __init__(
         self,
         reader: JobLogReader,
+        job_id: str,
+        attempt_id: str,
         *,
         evidence_refs: set[str] | None = None,
     ) -> None:
         self._reader = reader
+        self._job_id = job_id
+        self._attempt_id = attempt_id
         self._evidence_refs = evidence_refs
 
     # 从 reader 获取并截断一个稳定字节区间
@@ -174,8 +174,8 @@ class ReadJobLogTool(BaseTool):
         limit: int,
     ) -> LogSlice:
         raw = await self._reader.read(
-            params.job_id,
-            params.attempt_id,
+            self._job_id,
+            self._attempt_id,
             params.stream,
             start,
             min(limit, _MAX_RESULT_BYTES),
@@ -191,8 +191,8 @@ class ReadJobLogTool(BaseTool):
     async def invoke(self, params: dict[str, object]) -> ToolResult:
         parsed = ReadJobLogParams.model_validate(params)
         size = await self._reader.size(
-            parsed.job_id,
-            parsed.attempt_id,
+            self._job_id,
+            self._attempt_id,
             parsed.stream,
         )
         match_offset: int | None = None
@@ -212,8 +212,8 @@ class ReadJobLogTool(BaseTool):
                     error_type="schema_error",
                 )
             match_offset = await self._reader.search(
-                parsed.job_id,
-                parsed.attempt_id,
+                self._job_id,
+                self._attempt_id,
                 parsed.stream,
                 parsed.offset,
                 parsed.query.encode("utf-8"),
@@ -226,15 +226,15 @@ class ReadJobLogTool(BaseTool):
                 log_slice = await self._read_slice(parsed, start, parsed.limit)
 
         result = LogReadResult(
-            job_id=parsed.job_id,
-            attempt_id=parsed.attempt_id,
+            job_id=self._job_id,
+            attempt_id=self._attempt_id,
             stream=parsed.stream,
             mode=parsed.mode,
             size=size,
             match_offset=match_offset,
             slice=log_slice,
             reference=(
-                f"{parsed.stream}:{parsed.job_id}/{parsed.attempt_id}"
+                f"{parsed.stream}:{self._job_id}/{self._attempt_id}"
                 f"@bytes:{log_slice.start}-{log_slice.end}"
                 if log_slice is not None
                 else None

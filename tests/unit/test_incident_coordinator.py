@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from cyan.agent.events.bus import EventBus
 from cyan.agent.llm.types import LlmResponse, ToolCallBlock
 from cyan.config import CyanConfig
@@ -78,6 +80,7 @@ class _IncidentProvider:
     def __init__(self) -> None:
         self._run_id: str | None = None
         self._evidence: list[dict[str, str]] = []
+        self.chat_calls = 0
 
     # 根据当前步骤返回受控 Incident 工具调用
     async def chat(
@@ -91,6 +94,7 @@ class _IncidentProvider:
         system: str | None = None,
     ) -> LlmResponse:
         del bus
+        self.chat_calls += 1
         if run_id != self._run_id:
             self._run_id = run_id
             self._evidence = []
@@ -105,9 +109,6 @@ class _IncidentProvider:
         }
         if step == 1:
             assert system is not None
-            job_id = re.search(r'"job_id": "([^"]+)"', system)
-            attempt_id = re.search(r'"attempt_id": "([^"]+)"', system)
-            assert job_id is not None and attempt_id is not None
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -115,8 +116,6 @@ class _IncidentProvider:
                         id="read-log",
                         name="read_job_log",
                         input={
-                            "job_id": job_id.group(1),
-                            "attempt_id": attempt_id.group(1),
                             "stream": "stderr",
                             "mode": "tail",
                         },
@@ -219,7 +218,9 @@ def _workspace(root: Path, *, smoke_exit: int | None = None) -> Path:
 
 
 # 组装真实 JobSupervisor 与确定性只读 Agent 的完整 Incident 测试系统
-def _system(root: Path) -> tuple[IncidentCoordinator, JobSupervisor, JobStore]:
+def _system(
+    root: Path, *, provider: Any | None = None
+) -> tuple[IncidentCoordinator, JobSupervisor, JobStore]:
     jobs = JobStore(root.parent / "jobs")
     bus = EventBus()
     holder: dict[str, IncidentCoordinator] = {}
@@ -234,7 +235,7 @@ def _system(root: Path) -> tuple[IncidentCoordinator, JobSupervisor, JobStore]:
         supervisor,
         bus,
         CyanConfig(),
-        provider=_IncidentProvider(),
+        provider=provider or _IncidentProvider(),
     )
     holder["coordinator"] = coordinator
     return coordinator, supervisor, jobs
@@ -253,6 +254,21 @@ async def _wait_incident(
             return view
         await asyncio.sleep(0.01)
     raise AssertionError(f"incident did not reach {status}")
+
+
+# 等待指定 Incident run 进入给定终态原因
+async def _wait_run_reason(
+    store: IncidentStore,
+    incident_id: str,
+    run_id: str,
+    reason: str,
+) -> None:
+    for _ in range(300):
+        run = store.read_run(incident_id, run_id)
+        if run.status == "failed" and run.reason == reason:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"run did not fail with {reason}")
 
 
 # 功能：验证真实非零进程自动唤醒只读 Agent，审批前零写入，批准后真实重跑并 resolved
@@ -283,6 +299,71 @@ async def test_failure_to_approval_and_real_retry(tmp_path: Path) -> None:
         assert jobs.read_job(job.id).status == "succeeded"
         assert len(jobs.read_job(job.id).attempt_ids) == 2
         assert "recovered" in (workspace / "train.py").read_text(encoding="utf-8")
+        persisted = IncidentStore(jobs.job_dir(job.id) / "incidents").read_incident(
+            str(incident["id"])
+        )
+        assert persisted.apply_receipt is not None
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证 smoke 通过后使用最新状态启动原命令重跑
+# 设计：使用真实 Git、真实 smoke 子进程和真实训练重跑覆盖旧快照回归
+async def test_smoke_success_retries_original_command(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo", smoke_exit=0)
+    coordinator, supervisor, jobs = _system(workspace)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
+
+        result = await coordinator.decide(
+            str(awaiting["incident"]["id"]),
+            str(awaiting["proposal"]["id"]),
+            "approve",
+            run_smoke=True,
+            smoke_config_fingerprint=str(awaiting["smoke_config_fingerprint"]),
+        )
+
+        assert result == "retry_running"
+        resolved = await _wait_incident(coordinator, job.id, "resolved")
+        assert resolved["smoke_result"]["status"] == "passed"
+        assert resolved["incident"]["apply_receipt"] is not None
+        assert len(jobs.read_job(job.id).attempt_ids) == 2
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证非 Git 工作区的 proposal 只可审阅且批准无副作用
+# 设计：在真实非 Git 目录中完成诊断，检查视图门禁、FSM 和文件内容
+async def test_non_git_proposal_is_review_only(tmp_path: Path) -> None:
+    workspace = tmp_path / "plain-workspace"
+    workspace.mkdir()
+    original = 'import sys\nprint("boom", file=sys.stderr)\nsys.exit(2)\n'
+    (workspace / "train.py").write_text(original, encoding="utf-8")
+    coordinator, supervisor, jobs = _system(workspace)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
+
+        assert awaiting["can_apply"] is False
+        with pytest.raises(ValueError, match="review-only"):
+            await coordinator.decide(
+                str(awaiting["incident"]["id"]),
+                str(awaiting["proposal"]["id"]),
+                "approve",
+                run_smoke=False,
+            )
+
+        current = await coordinator.job_view(job.id)
+        assert current["incident"]["status"] == "awaiting_approval"
+        assert (workspace / "train.py").read_text(encoding="utf-8") == original
+        assert jobs.read_job(job.id).attempt_ids == ["attempt-0001"]
     finally:
         await coordinator.close()
 
@@ -410,6 +491,63 @@ async def test_follow_up_creates_bounded_run(tmp_path: Path) -> None:
         current = IncidentStore(jobs.job_dir(job.id) / "incidents").read_incident(incident_id)
         assert current.status == "diagnosing"
         assert current.active_run_id == run_id
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证已持久化 Capsule 后日志被替换会在 LLM 前拒绝运行
+# 设计：首轮完成后修改真实 stderr，比较 provider 调用数并检查 log_changed
+async def test_follow_up_rejects_changed_failure_log_before_llm(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo")
+    provider = _IncidentProvider()
+    coordinator, supervisor, jobs = _system(workspace, provider=provider)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
+        incident_id = str(awaiting["incident"]["id"])
+        attempt_id = str(awaiting["incident"]["attempt_id"])
+        calls_before = provider.chat_calls
+        jobs.log_path(job.id, attempt_id, "stderr").write_text(
+            "RuntimeError: replaced log\n", encoding="utf-8"
+        )
+
+        run_id = await coordinator.follow_up(incident_id, "Re-check this failure.")
+        store = IncidentStore(jobs.job_dir(job.id) / "incidents")
+        await _wait_run_reason(store, incident_id, run_id, "log_changed")
+
+        assert provider.chat_calls == calls_before
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证缺失持久化 Failure Capsule 时不会从当前日志重建
+# 设计：清空 failure.json 中的 capsule 后发起追问，断言稳定失败原因且 LLM 未调用
+async def test_follow_up_rejects_missing_failure_capsule(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo")
+    provider = _IncidentProvider()
+    coordinator, supervisor, jobs = _system(workspace, provider=provider)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
+        incident_id = str(awaiting["incident"]["id"])
+        attempt_id = str(awaiting["incident"]["attempt_id"])
+        failure = jobs.read_failure(job.id, attempt_id)
+        jobs.write_failure(failure.model_copy(update={"capsule": None}))
+        calls_before = provider.chat_calls
+
+        run_id = await coordinator.follow_up(incident_id, "Re-check this failure.")
+        store = IncidentStore(jobs.job_dir(job.id) / "incidents")
+        await _wait_run_reason(
+            store, incident_id, run_id, "failure_capsule_unavailable"
+        )
+
+        assert provider.chat_calls == calls_before
     finally:
         await coordinator.close()
 

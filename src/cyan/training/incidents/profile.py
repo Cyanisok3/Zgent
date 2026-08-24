@@ -47,12 +47,8 @@ def build_incident_profile(
 
     # 校验 Agent 提交的证据只来自初始选择或已经读取的结果
     def validate_evidence(evidence: EvidenceRef) -> str | None:
-        if evidence.source in ("stdout", "stderr"):
-            if not _reference_was_observed(evidence.reference, observed_refs):
-                return f"evidence reference was not observed: {evidence.reference}"
-            return None
-        if "@sha256:" not in evidence.reference:
-            return "workspace evidence must include a path and SHA-256"
+        if not _reference_was_observed(evidence.reference, observed_refs):
+            return f"evidence reference was not observed: {evidence.reference}"
         return None
 
     reader = FileJobLogReader(jobs.log_path)
@@ -60,7 +56,12 @@ def build_incident_profile(
         ReadFileTool(root, evidence_refs=observed_refs, max_bytes=64 * 1024, text_only=True),
         ListDirTool(root),
         SearchTextTool(root, evidence_refs=observed_refs),
-        ReadJobLogTool(reader, evidence_refs=observed_refs),
+        ReadJobLogTool(
+            reader,
+            incident.job_id,
+            incident.attempt_id,
+            evidence_refs=observed_refs,
+        ),
         SubmitDiagnosisTool(store, incident.id, evidence_validator=validate_evidence),
         ProposePatchTool(
             store,
