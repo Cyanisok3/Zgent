@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "shape",
+    "culprit": ["resize_token_embeddings", "tokenizer vocabulary", "embedding matrix"],
+    "causal_mechanism": ["new token id exceeds embedding rows", "tokenizer and model vocabulary mismatch"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "literal": "IndexError: index out of range in self"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "(?:modeling_bert|functional)\\.py.+embedding"
+      }
+    ]
+  ]
+}

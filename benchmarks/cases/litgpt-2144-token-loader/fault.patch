@@ -1,0 +1,9 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -15,5 +15,4 @@ def main() -> None:
+         num_workers=1,
+         chunk_bytes="64KB",
+-        item_loader=TokensLoader(),
+     )
+     print("token-preprocessing-complete", flush=True)

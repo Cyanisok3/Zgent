@@ -1,0 +1,9 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -72,4 +72,5 @@ def main() -> None:
+     )
+     special_token_id = tokenizer.add_special_tokens({"additional_special_tokens": ["[NEW_TOKEN]"]})
+     special_token_id = tokenizer.convert_tokens_to_ids("[NEW_TOKEN]")
++    model.resize_token_embeddings(len(tokenizer))
+     dataset = LateTokenDataset(special_token_id)

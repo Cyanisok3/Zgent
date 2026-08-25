@@ -1,0 +1,12 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -9,7 +9,7 @@ class MatrixActionEnvironment(gym.Env[np.ndarray, np.ndarray]):
+ 
+     def __init__(self) -> None:
+         self.observation_space = gym.spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
+-        self.action_space = gym.spaces.MultiDiscrete(np.array([[2], [2]], dtype=np.int64))
++        self.action_space = gym.spaces.MultiDiscrete(np.array([2, 2], dtype=np.int64))
+ 
+     def reset(
+         self,

@@ -1,0 +1,7 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -7,2 +7,2 @@
+-TRAIN_STEPS = 2
++TRAIN_STEPS = 800
+ 

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "checkpoint",
+    "culprit": ["safe serialization", "non-contiguous parameter", "word_embeddings.weight"],
+    "causal_mechanism": ["safetensors requires contiguous tensor storage", "transpose creates non-contiguous storage"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "ValueError: You are trying to save a non contiguous tensor"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "word_embeddings\\.weight"
+      }
+    ]
+  ]
+}

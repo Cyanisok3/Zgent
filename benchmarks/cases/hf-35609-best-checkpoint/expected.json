@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "checkpoint",
+    "culprit": ["best_model_checkpoint", "save_steps", "eval_steps"],
+    "causal_mechanism": ["best metric points to an unsaved checkpoint", "checkpoint rotation calls samefile on missing path"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "FileNotFoundError:.+checkpoint-2"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "literal": "os.path.samefile(checkpoint, self.state.best_model_checkpoint)"
+      }
+    ]
+  ]
+}

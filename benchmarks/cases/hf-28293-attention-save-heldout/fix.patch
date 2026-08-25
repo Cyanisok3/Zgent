@@ -1,0 +1,8 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -60,3 +60,4 @@
+ trainer.train()
+ print("training-main-loop-complete", flush=True)
++query.data = query.data.contiguous()
+ trainer.save_model(str(Path("saved-model")))

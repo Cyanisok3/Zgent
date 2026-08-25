@@ -1,0 +1,9 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -49,4 +49,5 @@
+ trainer.train()
+ print("training-main-loop-complete", flush=True)
++embedding.data = embedding.data.contiguous()
+ trainer.save_model(str(Path("saved-model")))
+ print("model-save-complete", flush=True)

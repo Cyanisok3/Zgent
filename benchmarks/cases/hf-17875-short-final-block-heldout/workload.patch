@@ -1,0 +1,10 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -14,4 +14,4 @@
+ BLOCK_SIZE = 8
+-FULL_BLOCKS = 20
+-LOG_EVERY = 10
++FULL_BLOCKS = 1201
++LOG_EVERY = 1
+ 

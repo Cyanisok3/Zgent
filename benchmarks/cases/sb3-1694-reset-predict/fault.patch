@@ -1,0 +1,11 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+index e4e337d..e82b6ee 100644
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -47,5 +47,5 @@ model.learn(total_timesteps=128)
+ print("training-main-loop-complete", flush=True)
+ evaluation = ContractEnv()
+ observation, _ = evaluation.reset()
+-model.predict(observation, deterministic=True)
++model.predict(evaluation.reset(), deterministic=True)
+ print("post-training-predict-complete", flush=True)

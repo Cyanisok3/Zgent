@@ -1,0 +1,27 @@
+schema_version = 1
+id = "sb3-1694-reset-predict"
+title = "A Gymnasium reset tuple is passed directly into SB3 predict after training"
+split = "test"
+framework = "stable-baselines3"
+training_domain = "general_ml"
+fault_family = "environment-api-contract"
+mechanism_id = "gymnasium-reset-tuple-passed-to-predict"
+failure_stage = "finalization"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/DLR-RM/stable-baselines3"
+repo_sha = "ba77dd7c6180c0ec9a47dfa98291c2103e6750df"
+issue_url = "https://github.com/DLR-RM/stable-baselines3/issues/1694"
+fix_url = "https://github.com/DLR-RM/stable-baselines3/issues/1694#issuecomment-1727695047"
+license = "MIT"
+env_id = "sb3-2-1"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+milestone_anchor = "training-main-loop-complete"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+MPLCONFIGDIR = "{benchmark_cache}/matplotlib"

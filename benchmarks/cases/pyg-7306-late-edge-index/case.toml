@@ -1,0 +1,26 @@
+schema_version = 1
+id = "pyg-7306-late-edge-index"
+title = "A late graph retains an edge index for a node removed from its feature matrix"
+split = "test"
+framework = "pytorch-geometric"
+training_domain = "general_ml"
+fault_family = "graph-data-integrity"
+mechanism_id = "edge-index-exceeds-node-features"
+failure_stage = "mid_run"
+origin_kind = "provenance_preserving_port"
+patchable = false
+repo_url = "https://github.com/pyg-team/pytorch_geometric"
+repo_sha = "7ca40d635c4757f53ec2a1260e4a9e6505f8ad49"
+issue_url = "https://github.com/pyg-team/pytorch_geometric/issues/7306"
+fix_url = "https://github.com/pyg-team/pytorch_geometric/discussions/6644"
+license = "MIT"
+env_id = "pyg-2-6"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+milestone_anchor = "training-graph=1"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"

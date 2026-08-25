@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "checkpoint",
+    "culprit": ["safe serialization", "non-contiguous attention parameter", "attention.self.query.weight"],
+    "causal_mechanism": ["safetensors requires contiguous tensor storage", "transpose creates non-contiguous storage"]
+  },
+  "required_groups": [
+    [{"source": "stdout", "regex": "training-step=1\\n"}],
+    [{"source": "stdout", "literal": "training-main-loop-complete"}],
+    [{"source": "stderr", "regex": "ValueError: You are trying to save a non contiguous tensor"}],
+    [{"source": "stderr", "regex": "attention\\.self\\.query\\.weight"}]
+  ]
+}

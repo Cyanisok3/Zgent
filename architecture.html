@@ -3,93 +3,288 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cyan 当前架构</title>
+  <meta name="description" content="Cyan 当前实现的训练故障诊断与受控修复架构说明">
+  <title>Cyan 当前架构 | 训练故障诊断与受控修复</title>
   <style>
-    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; color: #17202a; background: #f5f7fb; line-height: 1.6; }
-    main { max-width: 1100px; margin: 0 auto; padding: 40px 24px 72px; }
-    h1, h2 { color: #102a43; }
-    .lead { font-size: 1.12rem; color: #486581; }
-    .panel { margin: 24px 0; padding: 22px; background: #fff; border: 1px solid #d9e2ec; border-radius: 12px; box-shadow: 0 3px 12px #102a4312; }
-    .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .node { padding: 10px 14px; background: #e8f1ff; border: 1px solid #9fbad0; border-radius: 8px; }
-    .arrow { color: #627d98; font-weight: 700; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    pre { overflow: auto; padding: 16px; background: #102a43; color: #f0f4f8; border-radius: 8px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #d9e2ec; vertical-align: top; }
-    th { color: #334e68; }
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5e6b80;
+      --soft: #f5f7fb;
+      --panel: #ffffff;
+      --line: #dce3ee;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --teal: #087f8c;
+      --teal-soft: #e7f7f6;
+      --amber: #a15c00;
+      --amber-soft: #fff6df;
+      --purple: #6941c6;
+      --purple-soft: #f1ebff;
+      --shadow: 0 14px 34px rgba(28, 45, 75, .08);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--soft); line-height: 1.65; }
+    main { max-width: 1160px; margin: 0 auto; padding: 48px 24px 84px; }
+    header { max-width: 820px; margin-bottom: 34px; }
+    h1, h2, h3 { line-height: 1.25; color: #101828; }
+    h1 { margin: 0 0 16px; font-size: clamp(2rem, 4vw, 3.4rem); letter-spacing: -.04em; }
+    h2 { margin: 0 0 14px; font-size: 1.55rem; }
+    h3 { margin: 0 0 8px; font-size: 1.02rem; }
+    p { margin: 10px 0; }
+    .lead { margin: 0; color: var(--muted); font-size: 1.14rem; }
+    .eyebrow { margin: 0 0 12px; color: var(--blue); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .chip { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); font-size: .85rem; }
+    .panel { margin: 22px 0; padding: clamp(20px, 3vw, 30px); border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); }
+    .panel > p:last-child { margin-bottom: 0; }
+    .section-intro { max-width: 780px; color: var(--muted); }
+
+    .hero-flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: stretch; margin-top: 22px; }
+    .flow-node { min-height: 106px; padding: 15px; border: 1px solid #b9cdf4; border-radius: 13px; background: var(--blue-soft); }
+    .flow-node strong { display: block; margin-bottom: 4px; }
+    .flow-node small { display: block; color: var(--muted); line-height: 1.45; }
+    .hero-flow .flow-arrow { display: none; }
+
+    .steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fbfcfe; }
+    .step-number { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 800; }
+    .step p { color: var(--muted); }
+
+    .runtime-grid, .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fbfcfe; }
+    .card p { color: var(--muted); }
+    .card.blue { border-color: #b9cdf4; background: var(--blue-soft); }
+    .card.teal { border-color: #a8dfdc; background: var(--teal-soft); }
+    .card.amber { border-color: #f0d28b; background: var(--amber-soft); }
+    .card.purple { border-color: #d2c1ff; background: var(--purple-soft); }
+
+    .code-path { margin: 18px 0 0; padding: 18px 20px; overflow-x: auto; border-radius: 12px; background: #101828; color: #e6edf7; font: .89rem/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+    code { padding: .12em .35em; border-radius: 5px; background: #eef2f7; color: #243b64; font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .tool-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .tool-list code { border: 1px solid var(--line); background: #fff; }
+    .event-flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 20px; }
+    .event-node { padding: 14px; border: 1px solid #a8dfdc; border-radius: 12px; background: var(--teal-soft); text-align: center; }
+    .event-arrow { color: var(--teal); text-align: center; font-weight: 800; }
+
+    .state-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; }
+    .state { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; font: .84rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .state.active { border-color: #a8dfdc; background: var(--teal-soft); color: #075e67; }
+    .state.done { border-color: #b9cdf4; background: var(--blue-soft); color: #194185; }
+    .state-arrow { color: var(--muted); font-weight: 700; }
+
+    .boundary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+    .boundary-item { padding: 16px; border-top: 4px solid var(--blue); border-radius: 10px; background: #f8fafc; }
+    .boundary-item:nth-child(2) { border-top-color: var(--teal); }
+    .boundary-item:nth-child(3) { border-top-color: var(--purple); }
+    .boundary-item:nth-child(4) { border-top-color: var(--amber); }
+    .boundary-item p { color: var(--muted); font-size: .94rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #344054; font-size: .9rem; }
+    td { color: var(--muted); }
+    td:first-child { color: var(--ink); font-weight: 700; white-space: nowrap; }
+    .note { margin-top: 18px; padding: 14px 16px; border-left: 4px solid var(--amber); background: var(--amber-soft); color: #68400b; }
+    footer { margin-top: 30px; color: var(--muted); font-size: .9rem; }
+
+    @media (max-width: 820px) {
+      main { padding-top: 30px; }
+      .hero-flow, .event-flow { grid-template-columns: 1fr; }
+      .hero-flow .flow-arrow { display: grid; transform: rotate(90deg); min-height: 16px; }
+      .steps, .runtime-grid, .two-col, .boundary { grid-template-columns: 1fr; }
+      .event-arrow { transform: rotate(90deg); }
+      td:first-child { white-space: normal; }
+    }
   </style>
 </head>
 <body>
 <main>
-  <h1>Cyan：训练故障诊断与受控修复</h1>
-  <p class="lead">Cyan 是一个本地双进程系统。确定性的训练监督、证据选择和修复验证包围一个只执行受限工具调用的 Agent 内核。</p>
-
-  <section class="panel">
-    <h2>进程与所有权</h2>
-    <div class="flow">
-      <span class="node">cyan TUI / VS Code</span><span class="arrow">→ TCP loopback / NDJSON / JSON-RPC 2.0</span>
-      <span class="node">cyan-core</span>
+  <header>
+    <p class="eyebrow">Current implementation · readable architecture map</p>
+    <h1>Cyan：训练故障诊断与受控修复</h1>
+    <p class="lead">这是一条从用户启动训练，到进程失败、证据选择、Incident Agent 调查、人工批准、验证和原命令重跑的完整链路。页面先讲一条主线，再解释每个模块的所有权。</p>
+    <div class="chips" aria-label="architecture properties">
+      <span class="chip">local daemon</span>
+      <span class="chip">TCP loopback</span>
+      <span class="chip">NDJSON + JSON-RPC 2.0</span>
+      <span class="chip">human approval</span>
+      <span class="chip">original exit code decides resolution</span>
     </div>
-    <p><code>training.jobs</code> 独占训练进程组和持久化日志；<code>training.incidents</code> 独占故障状态、证据、提案和验证；<code>agent</code> 只负责显式工具驱动的 LLM 运行；<code>service</code> 负责协议和传输。</p>
-  </section>
+  </header>
 
-  <section class="panel">
-    <h2>一次故障的闭环</h2>
-    <div class="flow">
-      <span class="node">/monitor 预览命令</span><span class="arrow">→</span>
-      <span class="node">JobSupervisor</span><span class="arrow">→</span>
-      <span class="node">Failure Capsule</span><span class="arrow">→</span>
-      <span class="node">Evidence Selector</span><span class="arrow">→</span>
-      <span class="node">六个受限工具的只读 Agent</span><span class="arrow">→</span>
-      <span class="node">Diagnosis / Proposal</span><span class="arrow">→</span>
-      <span class="node">人工批准</span><span class="arrow">→</span>
-      <span class="node">PatchService</span><span class="arrow">→</span>
-      <span class="node">Smoke / 原命令重跑</span>
+  <section class="panel" aria-labelledby="main-chain">
+    <h2 id="main-chain">先看主链路：一次真实训练失败</h2>
+    <p class="section-intro">用户只需要在 TUI 中预览并启动训练命令。训练过程由 daemon 持有；Agent 不负责启动训练，也不直接改工作区。</p>
+    <div class="hero-flow" aria-label="main runtime chain">
+      <div class="flow-node"><strong>1 · User surface</strong><small><code>/monitor</code> 输入命令，<code>/start</code> 确认启动</small></div>
+      <div class="flow-node"><strong>2 · JobSupervisor</strong><small>启动真实进程，持续排空 stdout/stderr 并写入 Attempt</small></div>
+      <div class="flow-node"><strong>3 · Incident</strong><small>非零退出创建 Failure Capsule 和 Incident run</small></div>
+      <div class="flow-node"><strong>4 · AgentRuntime</strong><small>选择有限证据，运行六工具 Incident Agent</small></div>
+      <div class="flow-node"><strong>5 · Controlled recovery</strong><small>人工批准后应用补丁、可选 Smoke、重跑原命令</small></div>
     </div>
-    <p>原训练命令的退出码始终是最终成功依据。Smoke 是可选的前置验证；补丁应用、重试和恢复由 Incident Coordinator 控制。</p>
   </section>
 
-  <section class="panel">
-    <h2>模块边界</h2>
-    <pre>src/cyan/
-├── agent/       # 最小 LLM → tool → observe → stop 内核
-├── training/    # jobs、processes、incidents 与验证闭环
-├── service/     # daemon、协议、RPC 与 TCP 传输
-├── cli/         # cyan 与 cyan core start/stop
-├── tui/         # /monitor、/start、/jobs、/incident、/help
-└── config.py    # 三个领域共享配置</pre>
-    <p>Incident profile 固定注册 <code>read_file</code>、<code>list_dir</code>、<code>search_text</code>、<code>read_job_log</code>、<code>submit_diagnosis</code>、<code>propose_patch</code>。没有写文件、Shell 或任意扩展工具。</p>
+  <section class="panel" aria-labelledby="user-operation">
+    <h2 id="user-operation">一、从用户操作到真实训练进程</h2>
+    <div class="steps">
+      <article class="step"><span class="step-number">1</span><div><h3>TUI 连接 Core</h3><p>TUI 使用 <code>SocketClient</code> 连接 <code>cyan-core</code>。命令请求通过本机 TCP 发送，每行是一个 JSON-RPC 消息；事件则通过同一连接异步推送。</p></div></article>
+      <article class="step"><span class="step-number">2</span><div><h3>预览训练命令</h3><p><code>launch.preview</code> 解析用户输入，确定 argv、工作目录、环境覆盖项和 fingerprint。此时还没有启动训练进程。</p></div></article>
+      <article class="step"><span class="step-number">3</span><div><h3>确认并启动</h3><p><code>launch.start</code> 重新解析命令并检查 fingerprint 是否仍匹配。通过后由 <code>CoreApp</code> 调用 <code>JobSupervisor.start()</code>。</p></div></article>
+      <article class="step"><span class="step-number">4</span><div><h3>监督 Attempt</h3><p>Supervisor 使用 <code>asyncio.create_subprocess_exec</code> 启动进程组，stdin 为 <code>DEVNULL</code>，stdout 和 stderr 分别持久化。Job 状态和 Attempt 状态也同步写入 JobStore。</p></div></article>
+    </div>
+    <pre class="code-path">TUI / VS Code
+  -> SocketClient.send_command("launch.preview")
+  -> SocketClient.send_command("launch.start")
+  -> SocketServer._handle_line()
+  -> CoreApp._launch_start_handler()
+  -> CoreApp._start_job()
+  -> JobSupervisor.start()
+  -> JobSupervisor._launch()
+  -> asyncio.create_subprocess_exec(...)</pre>
   </section>
 
-  <section class="panel">
-    <h2>证据与上下文</h2>
+  <section class="panel" aria-labelledby="failure-boundary">
+    <h2 id="failure-boundary">二、进程失败如何变成 Incident</h2>
+    <p class="section-intro">Supervisor 是训练进程的唯一所有者。它不会把故障交给一个模糊的“后台 Agent”；它先把进程结果、日志和状态封口，再调用 Incident 领域。</p>
+    <div class="runtime-grid">
+      <article class="card blue"><h3>日志先落盘</h3><p>监控任务等待进程退出，同时持续读取 stdout/stderr。退出后写入 Attempt 的 return code、signal、结束时间和 <code>failure.json</code>。</p></article>
+      <article class="card teal"><h3>失败回调</h3><p>只有真实的 <code>process_exit</code> 故障会触发 <code>CoreApp._job_failure_handler()</code>，再进入 <code>IncidentCoordinator.handle_failure()</code>。</p></article>
+      <article class="card purple"><h3>Failure Capsule</h3><p>Coordinator 根据 Attempt 和不可变日志构造 Failure Capsule，并记录 cwd、命令、退出信息、日志范围和哈希。</p></article>
+      <article class="card amber"><h3>创建本轮 Run</h3><p>Incident、状态和 <code>runs/&lt;run_id&gt;/run.json</code> 在后台 Agent 任务开始前写入。随后 Coordinator 才启动 <code>IncidentRuntime</code>。</p></article>
+    </div>
+    <pre class="code-path">JobSupervisor._monitor()
+  -> write Attempt / FailureRecord
+  -> _notify_failure()
+  -> CoreApp._job_failure_handler()
+  -> IncidentCoordinator.handle_failure()
+  -> build_failure_capsule()
+  -> _start_run()
+  -> IncidentRuntime.run()</pre>
+  </section>
+
+  <section class="panel" aria-labelledby="runtime">
+    <h2 id="runtime">三、IncidentRuntime：进入 Agent 之前做什么</h2>
+    <p class="section-intro">IncidentRuntime 是训练领域和通用 Agent 内核之间的适配层。它决定 Agent 能看到哪些证据、能使用哪些工具，以及本轮运行如何被记录。</p>
+    <div class="runtime-grid">
+      <article class="card"><h3>1. 验证证据没有变化</h3><p>Runtime 重新计算 stdout/stderr 的 SHA-256。如果日志在 Failure Capsule 之后发生变化，本轮直接失败，不继续调查。</p></article>
+      <article class="card"><h3>2. 选择初始证据</h3><p>Evidence Selector v1 分块扫描不可变日志，按固定规则选择有限范围。它不调用 LLM、不读源码，也不改变工具权限。</p></article>
+      <article class="card"><h3>3. 创建 Incident profile</h3><p>Profile 把 Failure Capsule、已选择证据、当前指令和上一轮有限结果组合成 system prompt，并设置本轮预算。</p></article>
+      <article class="card"><h3>4. 注册六个工具</h3><p>四个工具只读；两个工具只写 Incident artifact，不写用户 workspace。</p><div class="tool-list" aria-label="incident tools"><code>read_file</code><code>list_dir</code><code>search_text</code><code>read_job_log</code><code>submit_diagnosis</code><code>propose_patch</code></div></article>
+    </div>
+    <div class="two-col">
+      <div class="card teal"><h3>本轮固定边界</h3><p>最多 12 步；总输入最多 128 KiB；初始日志证据有单独上限。上下文只包含当前 Incident 所需信息，不注入旧会话或全局记忆。</p></div>
+      <div class="card amber"><h3>提案不是应用</h3><p><code>propose_patch</code> 只验证一次精确且唯一的 SEARCH/REPLACE，并生成 <code>proposal.diff</code>。真正的校验、批准、应用和回滚由后续的 PatchService 流程负责。</p></div>
+    </div>
+    <pre class="code-path">IncidentRuntime.run()
+  -> verify immutable log hashes
+  -> select_evidence()
+  -> build_incident_profile()
+  -> AgentRunner.run_and_capture(
+         instruction,
+         run_id,
+         profile,
+         run_path,
+     )</pre>
+  </section>
+
+  <section class="panel" aria-labelledby="agent-loop">
+    <h2 id="agent-loop">四、AgentRunner 与 AgentLoop</h2>
+    <p class="section-intro"><code>AgentRunner</code> 负责组装一次受限运行；<code>AgentLoop</code> 负责重复执行“模型调用 → 工具调用 → 观察结果”。它们不负责训练进程管理，也不直接推进 Incident 状态。</p>
+    <div class="two-col">
+      <article class="card blue"><h3>AgentRunner.run_and_capture()</h3><p>创建本轮目录和本地 <code>EventBus</code>，启动 <code>EventWriter</code>，建立 <code>ExecutionContext</code>，注册 profile 中的工具，然后创建 provider 和 AgentLoop。</p></article>
+      <article class="card purple"><h3>ExecutionContext</h3><p>保存当前指令、assistant 消息、tool result、步骤数、状态和输入大小。工具结果在模型协议中使用 <code>user</code> 消息返回，但这不代表新的人工输入。</p></article>
+    </div>
+    <pre class="code-path">while context is running:
+  publish StepStartedEvent
+  check serialized input budget
+  response = provider.chat(messages, tools, system_prompt)
+  append assistant text and tool calls
+
+  if response requests tools:
+      invoke each registered tool
+      append tool results to context
+
+  if response.stop_reason == "end_turn":
+      mark success
+  elif max steps or an error is reached:
+      mark failure
+
+  publish StepFinishedEvent</pre>
+    <div class="note"><strong>重要边界：</strong>Agent 可以提交诊断和补丁提案，但不能运行 shell、修改训练 workspace 或自行批准补丁。它的输出必须经过 Incident 状态机和人工决策。</div>
+  </section>
+
+  <section class="panel" aria-labelledby="events">
+    <h2 id="events">五、事件如何从进程内运行到客户端</h2>
+    <p class="section-intro">项目把“进程内事件”和“跨进程 IPC”分成两层。Agent 只发布到 EventBus；Service 再决定哪些摘要应该通过 TCP 推送给客户端。</p>
+    <div class="event-flow">
+      <div class="event-node">AgentLoop / tools / provider</div><div class="event-arrow">→</div>
+      <div class="event-node">local EventBus<br><small>EventWriter → events.jsonl</small></div><div class="event-arrow">→</div>
+      <div class="event-node">Core EventBus<br><small>trace + broadcaster</small></div><div class="event-arrow">→</div>
+      <div class="event-node">IpcEventBroadcaster<br><small>TCP client event</small></div>
+    </div>
+    <p>客户端先通过 <code>event.subscribe</code> 注册 topics 和 scope。之后会收到 <code>kind: "event"</code> 的 NDJSON 推送，并可以用 <code>job.get</code> 读取权威快照。事件适合驱动界面刷新，Incident 和 Job 文件才是恢复所依赖的持久状态。</p>
+  </section>
+
+  <section class="panel" aria-labelledby="recovery">
+    <h2 id="recovery">六、人工批准后的修复闭环</h2>
+    <p class="section-intro">Agent 结束后，Coordinator 读取诊断和提案结果。如果两者都存在，Incident 才会进入等待批准状态；否则本轮调查失败或停留在不可应用状态。</p>
+    <div class="state-line" aria-label="incident state flow">
+      <span class="state active">diagnosing</span><span class="state-arrow">→</span><span class="state active">awaiting_approval</span><span class="state-arrow">→</span><span class="state active">applying</span><span class="state-arrow">→</span><span class="state">smoke_running</span><span class="state-arrow">→</span><span class="state">smoke_passed / smoke_skipped</span><span class="state-arrow">→</span><span class="state active">retry_running</span><span class="state-arrow">→</span><span class="state done">resolved</span>
+    </div>
+    <div class="steps">
+      <article class="step"><span class="step-number">1</span><div><h3>Review</h3><p>客户端通过 <code>incident.review</code> 获取提案对应文件的前后文本。用户看到的是生成的单文件补丁，而不是 Agent 任意写入后的工作区。</p></div></article>
+      <article class="step"><span class="step-number">2</span><div><h3>Apply</h3><p>用户批准后，PatchService 检查 proposal 哈希、目标文件哈希、workspace 根目录和 <code>git apply --check</code>，然后才应用补丁。</p></div></article>
+      <article class="step"><span class="step-number">3</span><div><h3>Optional Smoke</h3><p>如果 workspace 声明了 Smoke verifier，它会在原训练命令前运行。Smoke 失败时可以安全回滚；Smoke 成功或被跳过后才进入重跑。</p></div></article>
+      <article class="step"><span class="step-number">4</span><div><h3>Retry</h3><p>重跑使用 JobStore 中保存的原始 argv、cwd 和环境。只有原训练命令最终返回 0，Incident 才能进入 <code>resolved</code>。</p></div></article>
+    </div>
+    <p class="note"><strong>如果重跑仍然失败：</strong>Coordinator 会把新的 Attempt 绑定回同一个 Incident，清理旧的 Agent artifacts，并重新开始证据选择和诊断，而不是静默地把失败标记为成功。</p>
+  </section>
+
+  <section class="panel" aria-labelledby="ownership">
+    <h2 id="ownership">模块边界：每一层只拥有自己的问题</h2>
+    <div class="boundary">
+      <article class="boundary-item"><h3><code>service</code></h3><p>daemon 生命周期、TCP、NDJSON、JSON-RPC 路由和客户端事件推送。</p></article>
+      <article class="boundary-item"><h3><code>training.jobs</code></h3><p>真实训练进程组、Attempt、stdout/stderr、重跑所需的 argv/cwd/env。</p></article>
+      <article class="boundary-item"><h3><code>training.incidents</code></h3><p>Failure Capsule、证据选择、状态机、审批、PatchService、Smoke 和恢复。</p></article>
+      <article class="boundary-item"><h3><code>agent</code></h3><p>LLM provider、上下文、工具注册、AgentLoop 和运行事件；不拥有 IPC 或训练业务。</p></article>
+    </div>
     <table>
-      <tr><th>组件</th><th>约束</th></tr>
-      <tr><td>Evidence Selector v1</td><td>纯函数、分块扫描不可变日志、固定优先级、最多 32 KiB；不调用 LLM、不读源码、不缓存。</td></tr>
-      <tr><td>Incident Context</td><td>每轮只放当前 Capsule、选择的证据、当前指令、上一轮有限结果和最新验证结果；总输入最多 128 KiB。</td></tr>
-      <tr><td>AgentRunner</td><td>只接受显式 RunProfile 和工具；超出预算的工具结果替换为结构化预算事件，不发送已知超限请求。</td></tr>
+      <thead><tr><th>问题</th><th>权威位置</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td>训练进程是否成功</td><td>Attempt return code</td><td>Agent 的文字不能替代真实进程结果。</td></tr>
+        <tr><td>Incident 当前处于什么状态</td><td><code>incident.json</code> + FSM</td><td>状态必须经过合法事件转换，并支持 daemon 重启恢复。</td></tr>
+        <tr><td>Agent 本轮做了什么</td><td><code>runs/&lt;run_id&gt;/events.jsonl</code> + <code>run.json</code></td><td>事件记录和有限运行元数据可用于回放与评测。</td></tr>
+        <tr><td>客户端显示什么</td><td>Python daemon snapshot</td><td>TUI/VS Code 只做展示和交互，不重新实现 Incident 逻辑。</td></tr>
+      </tbody>
     </table>
   </section>
 
-  <section class="panel">
-    <h2>持久化</h2>
-    <pre>~/.cyan/jobs/&lt;job_id&gt;/incidents/&lt;incident_id&gt;/
-├── incident.json
-├── proposal.diff                 # 有提案时才存在
-├── smoke.stdout.log              # 运行 Smoke 时才存在
-├── smoke.stderr.log
-└── runs/&lt;run_id&gt;/
-    ├── run.json
-    └── events.jsonl</pre>
-    <p><code>incident.json</code> 是当前快照；<code>run.json</code> 是单轮有限记录；<code>events.jsonl</code> 只保存摘要事件，用于重连回放和运行评测。完整训练日志仍属于 Job Attempt，不复制进 Incident。</p>
+  <section class="panel" aria-labelledby="storage">
+    <h2 id="storage">持久化目录</h2>
+    <pre class="code-path">~/.cyan/jobs/&lt;job_id&gt;/
+├── job.json
+├── events.jsonl
+├── launch.json                    # private, 0600
+├── attempts/&lt;attempt_id&gt;/
+│   ├── attempt.json
+│   ├── stdout.log
+│   ├── stderr.log
+│   └── failure.json
+└── incidents/&lt;incident_id&gt;/
+    ├── incident.json              # current Incident snapshot
+    ├── proposal.diff               # only while a proposal exists
+    ├── smoke.*.log                 # only if Smoke runs
+    └── runs/&lt;run_id&gt;/
+        ├── run.json               # bounded run metadata
+        └── events.jsonl            # summarized Agent events</pre>
+    <p>完整训练输出只保留在 Attempt 日志中。Incident artifacts 保存状态、哈希、证据引用、诊断、提案和验证结果，不重复复制大段日志、补丁正文或模型上下文。</p>
   </section>
 
-  <section class="panel">
-    <h2>协议与公开表面</h2>
-    <p>Wire Protocol v2 保留启动、停止、订阅、Job、Incident、Run、Step、Tool 和 LLM 事件，并提供 <code>incident.follow_up</code>。TUI 是正常用户的唯一入口；公开命令为 <code>cyan</code>、<code>cyan --version</code>、<code>cyan core start [--json]</code>、<code>cyan core stop</code> 和内部的 <code>cyan-core</code>。</p>
-  </section>
+  <footer>当前公开入口是 <code>cyan</code> TUI，以及用于启动和停止 daemon 的 <code>cyan core start</code> / <code>cyan core stop</code>。页面描述的是当前代码路径，不把 roadmap 或通用 Agent 能力当作现有功能。</footer>
 </main>
 </body>
 </html>

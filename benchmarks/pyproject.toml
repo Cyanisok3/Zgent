@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cyan-bench"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "cyan",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+cyan-bench = "cyan_bench.cli:main"
+
+[tool.uv.sources]
+cyan = { path = "..", editable = true }
+
+[dependency-groups]
+dev = [
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cyan_bench"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

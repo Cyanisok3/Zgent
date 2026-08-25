@@ -1,0 +1,7 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -7,2 +7,2 @@
+-BLOCK_SIZE = 16
++BLOCK_SIZE = 131072
+ 

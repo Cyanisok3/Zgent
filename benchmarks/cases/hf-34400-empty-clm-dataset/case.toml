@@ -1,0 +1,26 @@
+schema_version = 1
+id = "hf-34400-empty-clm-dataset"
+title = "Model context length makes run_clm discard an entire short corpus"
+split = "test"
+framework = "transformers-trainer"
+training_domain = "llm"
+fault_family = "language-model-dataset-construction"
+mechanism_id = "clm-block-size-empties-dataset"
+failure_stage = "startup"
+origin_kind = "provenance_preserving_port"
+patchable = false
+repo_url = "https://github.com/huggingface/transformers"
+repo_sha = "d8e05951b8efd4880acca9a3f291e8b65841a86d"
+issue_url = "https://github.com/huggingface/transformers/issues/34400"
+fix_url = "https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py"
+license = "Apache-2.0"
+env_id = "hf-4-53"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+HF_HOME = "{benchmark_cache}/huggingface"

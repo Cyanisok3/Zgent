@@ -1,0 +1,27 @@
+schema_version = 1
+id = "hf-37593-eval-batch-concat"
+title = "Trainer metric callback aggregates un-concatenated evaluation batches"
+split = "dev"
+framework = "transformers-trainer"
+training_domain = "llm"
+fault_family = "evaluation-aggregation"
+mechanism_id = "eval-prediction-list-not-concatenated"
+failure_stage = "finalization"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/huggingface/transformers"
+repo_sha = "006530d285358bf5a19c5f01a6a35eae5f7db297"
+issue_url = "https://github.com/huggingface/transformers/issues/37593"
+fix_url = "https://github.com/huggingface/transformers/pull/37621"
+license = "Apache-2.0"
+env_id = "hf-4-53"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+milestone_anchor = "training-main-loop-complete"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+HF_HOME = "{benchmark_cache}/huggingface"

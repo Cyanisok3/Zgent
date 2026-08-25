@@ -1,0 +1,12 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+index 4e3b52e..0465a24 100644
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -27,7 +27,5 @@
+ def compute_metrics(eval_prediction: object) -> dict[str, float]:
+     predictions = eval_prediction.predictions
+     labels = eval_prediction.label_ids
+-    predictions = np.concatenate(predictions, axis=0)
+-    labels = np.concatenate(labels, axis=0)
+     predicted_labels = np.argmax(predictions, axis=1)
+     return {"accuracy": float(np.mean(predicted_labels == labels))}

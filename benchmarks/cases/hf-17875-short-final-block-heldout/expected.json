@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "data-collation",
+    "culprit": ["group_tokens", "short final block", "default data collator"],
+    "causal_mechanism": ["remainder shorter than block size is retained", "torch.stack receives unequal sequence lengths"]
+  },
+  "required_groups": [
+    [{"source": "stdout", "regex": "training-step=1\\n"}],
+    [{"source": "stdout", "regex": "training-step=599\\n"}],
+    [{"source": "stderr", "regex": "RuntimeError: stack expects each tensor to be equal size"}],
+    [{"source": "stderr", "literal": "torch.stack([f[k] for f in features])"}]
+  ]
+}

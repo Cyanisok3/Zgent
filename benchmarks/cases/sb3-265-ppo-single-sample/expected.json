@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "numerics",
+    "culprit": ["n_steps", "advantage normalization", "effective batch size one"],
+    "causal_mechanism": ["single-sample standard deviation is undefined", "NaN update corrupts policy parameters"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "(?:ValueError: Expected parameter logits|RuntimeError: invalid multinomial distribution)"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "(?:categorical|distribution).*\\.py"
+      }
+    ]
+  ]
+}

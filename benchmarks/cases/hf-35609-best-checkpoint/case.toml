@@ -1,0 +1,28 @@
+schema_version = 1
+id = "hf-35609-best-checkpoint"
+title = "Trainer rotates a best-model checkpoint that evaluation never saved"
+split = "test"
+framework = "transformers-trainer"
+training_domain = "llm"
+fault_family = "checkpoint-state-machine"
+mechanism_id = "best-checkpoint-points-to-unsaved-step"
+failure_stage = "finalization"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/huggingface/transformers"
+repo_sha = "a22a4378d97d06b7a1d9abad6e0086d30fdea199"
+issue_url = "https://github.com/huggingface/transformers/issues/35609"
+fix_url = "https://github.com/huggingface/transformers/pull/35885"
+license = "Apache-2.0"
+env_id = "hf-4-49"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+milestone_anchor = "training-step=3"
+control_role = "warning_heavy"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+HF_HOME = "{benchmark_cache}/huggingface"

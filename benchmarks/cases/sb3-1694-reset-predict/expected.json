@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "environment-api",
+    "culprit": ["Gymnasium reset return", "model.predict", "observation tuple"],
+    "causal_mechanism": ["reset returns (observation, info)", "predict expects only the observation array"]
+  },
+  "required_groups": [
+    [{"source": "stdout", "literal": "training-main-loop-complete"}],
+    [{"source": "stderr", "regex": "ValueError: setting an array element with a sequence.+inhomogeneous shape"}]
+  ]
+}

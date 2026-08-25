@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "graph-data-integrity",
+    "culprit": ["edge_index", "removed node", "node feature matrix"],
+    "causal_mechanism": ["edge index references a non-existing node", "message passing indexes beyond x rows"]
+  },
+  "required_groups": [
+    [{"source": "stdout", "literal": "training-graph=1"}],
+    [{"source": "stdout", "literal": "training-graph=81 nodes=4 max_edge=5"}],
+    [{"source": "stderr", "literal": "IndexError: index 5 is out of bounds for dimension 0 with size 4"}]
+  ]
+}

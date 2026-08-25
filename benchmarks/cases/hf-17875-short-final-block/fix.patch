@@ -1,0 +1,9 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -20,4 +20,3 @@
+     total_length = len(tokens)
+-    if total_length >= BLOCK_SIZE:
+-        total_length = (total_length // BLOCK_SIZE) * BLOCK_SIZE
++    total_length = (total_length // BLOCK_SIZE) * BLOCK_SIZE
+     return [tokens[index : index + BLOCK_SIZE] for index in range(0, total_length, BLOCK_SIZE)]

@@ -1,0 +1,12 @@
+[project]
+name = "cyan-bench-litgpt-0-5"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "litdata==0.2.58",
+    "numpy<3",
+    "torch==2.7.1",
+]
+
+[tool.uv]
+package = false

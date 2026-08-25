@@ -1,0 +1,25 @@
+schema_version = 1
+id = "litgpt-2144-token-loader"
+title = "LitGPT token preprocessing omits the LitData TokensLoader metadata"
+split = "dev"
+framework = "litgpt-litdata"
+training_domain = "llm"
+fault_family = "token-stream-metadata"
+mechanism_id = "litdata-token-loader-metadata-missing"
+failure_stage = "startup"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/Lightning-AI/litgpt"
+repo_sha = "062fff2f96f27416cc866eefb32352955234a332"
+issue_url = "https://github.com/Lightning-AI/litgpt/issues/2144"
+fix_url = "https://github.com/Lightning-AI/litgpt/pull/2148"
+license = "Apache-2.0"
+env_id = "litgpt-0-5"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"

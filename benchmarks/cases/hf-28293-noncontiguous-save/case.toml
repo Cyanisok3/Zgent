@@ -1,0 +1,27 @@
+schema_version = 1
+id = "hf-28293-noncontiguous-save"
+title = "Trainer safe serialization rejects a non-contiguous trained parameter"
+split = "dev"
+framework = "transformers-trainer"
+training_domain = "llm"
+fault_family = "checkpoint-serialization"
+mechanism_id = "safetensors-noncontiguous-parameter"
+failure_stage = "finalization"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/huggingface/transformers"
+repo_sha = "7d4ae973174f2e7dfdfe2b692640ee4a7e126e00"
+issue_url = "https://github.com/huggingface/transformers/issues/28293"
+fix_url = "https://github.com/huggingface/transformers/issues/28293#issuecomment-1893652255"
+license = "Apache-2.0"
+env_id = "hf-4-36"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+milestone_anchor = "training-main-loop-complete"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+HF_HOME = "{benchmark_cache}/huggingface"

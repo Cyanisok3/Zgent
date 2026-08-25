@@ -1,0 +1,11 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -68,6 +68,6 @@ arguments = TrainingArguments(
+     eval_steps=1,
+     save_strategy="steps",
+-    save_steps=3,
++    save_steps=1,
+     save_total_limit=1,
+     metric_for_best_model="score",
+     greater_is_better=True,

@@ -1,0 +1,7 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -5,2 +5,2 @@
+-FINAL_EDGE = 3
++FINAL_EDGE = 5
+ 

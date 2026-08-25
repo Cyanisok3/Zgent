@@ -139,6 +139,14 @@ uv run python scripts/gen_protocol_doc.py
 uv run python scripts/gen_protocol_doc.py --check
 ```
 
+## 真实故障评测
+
+[`benchmarks/`](benchmarks/) 提供与产品环境隔离的 15 个真实训练故障和 3 个正常 Control，包含
+固定上游来源、三次准入、四种无工具检索/诊断基线及完整 Cyan 闭环。冻结测试集当前的
+resolved rate 为 40.74%，正常产品路径 9/9 未误触发 Incident；完整结果、分阶段分析与限制见
+[`formal-v1` 报告](benchmarks/reports/formal-v1/report.md)。自动语义评分只是关键词下界，独立
+人工盲审尚未完成。
+
 ## 开发验证
 
 ```bash

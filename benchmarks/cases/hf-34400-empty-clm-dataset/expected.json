@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "dataset-construction",
+    "culprit": ["block_size", "group_tokens", "empty train dataset"],
+    "causal_mechanism": ["block size exceeds total corpus tokens", "remainder truncation removes every sample"]
+  },
+  "required_groups": [
+    [{"source": "stdout", "literal": "source_tokens=63 grouped_blocks=0 block_size=131072"}],
+    [{"source": "stderr", "regex": "num_samples should be a positive integer value, but got num_samples=0"}]
+  ]
+}

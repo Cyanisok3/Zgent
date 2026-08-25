@@ -1,0 +1,7 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -8,2 +8,2 @@
+-NORMAL_SAMPLES = 20
++NORMAL_SAMPLES = 1200
+ LOG_EVERY = 1

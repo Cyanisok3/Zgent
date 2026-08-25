@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "evaluation",
+    "culprit": ["compute_metrics", "np.concatenate", "eval_do_concat_batches"],
+    "causal_mechanism": ["variable-sized batch arrays remain a list", "predictions must be concatenated"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "ValueError: (?:setting an array element with a sequence|inhomogeneous shape)"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "cyan_bench_train\\.py.+np\\.argmax"
+      },
+      {
+        "source": "stderr",
+        "literal": "compute_metrics"
+      }
+    ]
+  ]
+}

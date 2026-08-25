@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "data",
+    "culprit": ["streaming dataset", "range split", "train[:20%]"],
+    "causal_mechanism": ["iterable dataset does not support slice splits", "streaming split"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "ValueError:.*(?:Bad split|split).*train\\[:20%\\]"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "run_clm\\.py.+(?:load_dataset|main)"
+      }
+    ]
+  ]
+}

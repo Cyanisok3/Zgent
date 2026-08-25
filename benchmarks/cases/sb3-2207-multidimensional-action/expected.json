@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "environment",
+    "culprit": ["MultiDiscrete", "nvec", "action space"],
+    "causal_mechanism": ["policy assumes one-dimensional action dimensions", "nested nvec reaches linear layer construction"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "TypeError: empty\\(\\): argument 'size'.+numpy\\.ndarray"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "literal": "nn.Linear(latent_dim, sum(self.action_dims))"
+      }
+    ]
+  ]
+}

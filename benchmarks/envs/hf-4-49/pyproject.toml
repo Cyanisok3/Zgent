@@ -1,0 +1,13 @@
+[project]
+name = "cyan-bench-hf-4-49"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "accelerate==1.4.0",
+    "numpy<3",
+    "torch==2.7.1",
+    "transformers==4.49.0",
+]
+
+[tool.uv]
+package = false

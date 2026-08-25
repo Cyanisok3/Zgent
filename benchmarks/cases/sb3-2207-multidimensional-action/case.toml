@@ -1,0 +1,26 @@
+schema_version = 1
+id = "sb3-2207-multidimensional-action"
+title = "SB3 policy construction receives a multidimensional MultiDiscrete action nvec"
+split = "test"
+framework = "stable-baselines3"
+training_domain = "general_ml"
+fault_family = "environment-space-contract"
+mechanism_id = "multidiscrete-action-nvec-rank"
+failure_stage = "startup"
+origin_kind = "provenance_preserving_port"
+patchable = false
+repo_url = "https://github.com/DLR-RM/stable-baselines3"
+repo_sha = "ba77dd7c6180c0ec9a47dfa98291c2103e6750df"
+issue_url = "https://github.com/DLR-RM/stable-baselines3/issues/2207"
+fix_url = "https://github.com/DLR-RM/stable-baselines3/pull/2211"
+license = "MIT"
+env_id = "sb3-2-1"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+MPLCONFIGDIR = "{benchmark_cache}/matplotlib"

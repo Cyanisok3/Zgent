@@ -1,0 +1,36 @@
+diff --git a/stable_baselines3/ppo/ppo.py b/stable_baselines3/ppo/ppo.py
+--- a/stable_baselines3/ppo/ppo.py
++++ b/stable_baselines3/ppo/ppo.py
+@@ -136,12 +136,6 @@ class PPO(OnPolicyAlgorithm):
+ 
+         if self.env is not None:
+-            # Check that `n_steps * n_envs > 1` to avoid NaN
+-            # when doing advantage normalization
+             buffer_size = self.env.num_envs * self.n_steps
+-            assert buffer_size > 1 or (
+-                not normalize_advantage
+-            ), f"`n_steps * n_envs` must be greater than 1. Currently n_steps={self.n_steps} and n_envs={self.env.num_envs}"
+-            # Check that the rollout buffer size is a multiple of the mini-batch size
+             untruncated_batches = buffer_size // batch_size
+             if buffer_size % batch_size > 0:
+                 warnings.warn(
+@@ -212,7 +206,7 @@ class PPO(OnPolicyAlgorithm):
+                 # Normalize advantage
+                 advantages = rollout_data.advantages
+                 # Normalization does not make sense if mini batchsize == 1, see GH issue #325
+-                if self.normalize_advantage and len(advantages) > 1:
++                if self.normalize_advantage:
+                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+ 
+                 # ratio between old and new policy, should be one at the first iteration
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -14,6 +14,6 @@ model = PPO(
+     "MlpPolicy",
+     environment,
+-    n_steps=2,
++    n_steps=1,
+     batch_size=2,
+     n_epochs=1,
+     seed=23,

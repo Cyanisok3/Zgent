@@ -1,0 +1,11 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -67,7 +67,6 @@ def main() -> None:
+     )
+     model = BertLMHeadModel(config)
+     tokenizer.add_special_tokens({"additional_special_tokens": ["[NEW_TOKEN]"]})
+-    model.resize_token_embeddings(len(tokenizer))
+     encoded = tokenizer(
+         ["training model learns [NEW_TOKEN] ."] * 4,
+         padding="max_length",

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "dtype",
+    "culprit": ["replay buffer", "action dtype", "float64"],
+    "causal_mechanism": ["float64 actions", "float32 critic", "dtype mismatch"]
+  },
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "RuntimeError:.*(?:Double|Float|dtype)"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "stable_baselines3/(?:sac|common)/.+\\.py"
+      }
+    ]
+  ]
+}

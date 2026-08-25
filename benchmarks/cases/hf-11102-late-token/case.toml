@@ -1,0 +1,27 @@
+schema_version = 1
+id = "hf-11102-late-token"
+title = "A newly added tokenizer symbol first appears in a late training batch"
+split = "test"
+framework = "transformers-trainer"
+training_domain = "llm"
+fault_family = "tokenizer-model-contract"
+mechanism_id = "tokenizer-embedding-vocab-mismatch"
+failure_stage = "mid_run"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/huggingface/transformers"
+repo_sha = "d8e05951b8efd4880acca9a3f291e8b65841a86d"
+issue_url = "https://github.com/huggingface/transformers/issues/11102"
+fix_url = "https://github.com/huggingface/transformers/pull/11120"
+license = "Apache-2.0"
+env_id = "hf-4-53"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 900
+hardware = "cpu"
+milestone_anchor = "training-step=1"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+HF_HOME = "{benchmark_cache}/huggingface"
