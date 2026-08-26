@@ -106,14 +106,17 @@ class _IncidentProvider:
             self._run_id = run_id
             self._evidence = []
         tool_names = {str(item.get("name")) for item in tool_schemas}
-        assert tool_names == {
-            "read_file",
-            "list_dir",
-            "search_text",
-            "read_job_log",
-            "submit_diagnosis",
-            "propose_patch",
-        }
+        if step >= 4 and not self._abstain:
+            assert tool_names == {"propose_patch"}
+        else:
+            assert tool_names == {
+                "read_file",
+                "list_dir",
+                "search_text",
+                "read_job_log",
+                "submit_diagnosis",
+                "propose_patch",
+            }
         if step == 1:
             assert system is not None
             return LlmResponse(

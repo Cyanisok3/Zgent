@@ -25,6 +25,8 @@ class _MockProvider:
     ) -> None:
         self._responses = iter(responses)
         self._exc = exc
+        self.calls = 0
+        self.seen_schemas: list[list[dict[str, object]]] = []
 
     async def chat(
         self,
@@ -38,6 +40,8 @@ class _MockProvider:
     ) -> LlmResponse:
         if self._exc is not None:
             raise self._exc
+        self.calls += 1
+        self.seen_schemas.append(list(tool_schemas))
         return next(self._responses)
 
 
@@ -61,6 +65,27 @@ class _FailTool(BaseTool):
 
     async def invoke(self, params: dict[str, object]) -> ToolResult:
         raise RuntimeError("tool error")
+
+
+class _ResultTool(BaseTool):
+    # 返回固定结果并记录调用次数，隔离终止语义对工具执行的影响
+    def __init__(
+        self,
+        name: str,
+        result: ToolResult,
+        calls: list[str],
+    ) -> None:
+        self.name = name
+        self.description = name
+        self.input_schema = {"type": "object", "properties": {}, "required": []}
+        self._result = result
+        self._calls = calls
+
+    # 返回预设工具结果
+    async def invoke(self, params: dict[str, object]) -> ToolResult:
+        del params
+        self._calls.append(self.name)
+        return self._result
 
 
 # --- helpers -----------------------------------------------------------------
@@ -269,3 +294,148 @@ async def test_assistant_message_blocks_added_to_context() -> None:
     blocks = assistant_msg["content"]
     assert blocks[0]["type"] == "text"  # type: ignore[index]
     assert blocks[0]["text"] == "answer"  # type: ignore[index]
+
+
+# 功能：验证终态诊断成功后同轮剩余工具调用不会执行
+# 设计：同一响应同时请求诊断和只读工具，诊断终态应立即结束而不产生额外调用
+async def test_terminal_tool_stops_remaining_calls() -> None:
+    calls: list[str] = []
+    provider = _MockProvider(
+        [
+            LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    _tc("submit_diagnosis", {}, "diagnosis"),
+                    _tc("read_file", {}, "read"),
+                ],
+            )
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(
+        _ResultTool(
+            "submit_diagnosis",
+            ToolResult(content="diagnosis", stop_after_success=True),
+            calls,
+        )
+    )
+    registry.register(_ResultTool("read_file", ToolResult(content="read"), calls))
+
+    loop, _ = _make_loop(provider, registry)
+    ctx = _ctx()
+    await loop.run(ctx)
+
+    assert ctx.status == "success"
+    assert calls == ["submit_diagnosis"]
+    assert provider.calls == 1
+
+
+# 功能：验证 direct 诊断成功后下一步只暴露并执行 propose_patch
+# 设计：覆盖 Incident 的 Diagnosis → Proposal 阶段切换，并确认只读工具不会回游
+async def test_direct_diagnosis_enters_proposal_phase() -> None:
+    calls: list[str] = []
+    provider = _MockProvider(
+        [
+            LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[_tc("submit_diagnosis", {}, "diagnosis")],
+            ),
+            LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    _tc("read_file", {}, "read"),
+                    _tc("propose_patch", {}, "proposal"),
+                ],
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(
+        _ResultTool(
+            "submit_diagnosis",
+            ToolResult(content="diagnosis"),
+            calls,
+        )
+    )
+    registry.register(_ResultTool("read_file", ToolResult(content="read"), calls))
+    registry.register(
+        _ResultTool(
+            "propose_patch",
+            ToolResult(content="proposal", stop_after_success=True),
+            calls,
+        )
+    )
+
+    loop = AgentLoop(
+        provider,
+        registry,
+        EventBus(),
+        finalization_sequence=("submit_diagnosis", "propose_patch"),
+        finalization_steps=3,
+    )
+    ctx = _ctx(max_steps=6)
+    await loop.run(ctx)
+
+    assert ctx.status == "success"
+    assert calls == ["submit_diagnosis", "propose_patch"]
+    assert [schema["name"] for schema in provider.seen_schemas[1]] == ["propose_patch"]
+
+
+# 功能：验证只读结果侵占软预算时被替换且不会标记硬预算失败
+# 设计：让大结果超过 max-reserve，检查下一轮进入诊断收尾并保留 context_budget 未触发
+async def test_read_result_respects_finalization_reserve() -> None:
+    calls: list[str] = []
+    provider = _MockProvider(
+        [
+            LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[_tc("read_file", {}, "read")],
+            ),
+            LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[_tc("submit_diagnosis", {}, "diagnosis")],
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_ResultTool("read_file", ToolResult(content="x" * 2000), calls))
+    registry.register(
+        _ResultTool(
+            "submit_diagnosis",
+            ToolResult(content="diagnosis", stop_after_success=True),
+            calls,
+        )
+    )
+    loop = AgentLoop(
+        provider,
+        registry,
+        EventBus(),
+        finalization_sequence=("submit_diagnosis", "propose_patch"),
+        finalization_reserve_bytes=256,
+    )
+    ctx = _ctx()
+    ctx.max_input_bytes = 1024
+    await loop.run(ctx)
+
+    assert ctx.status == "success"
+    assert calls == ["read_file", "submit_diagnosis"]
+    assert ctx.budget_exhausted is False
+    assert "finalization_reserve_reached" in str(ctx.messages)
+
+
+# 功能：验证收尾阶段未调用必需工具时给出稳定失败原因
+# 设计：最后一步让 provider 直接结束，区分 finalization_tool_missing 与普通 max_steps
+async def test_finalization_requires_tool_before_last_step() -> None:
+    provider = _MockProvider([LlmResponse(stop_reason="end_turn", text="done")])
+    loop = AgentLoop(
+        provider,
+        ToolRegistry(),
+        EventBus(),
+        finalization_sequence=("submit_diagnosis", "propose_patch"),
+        finalization_steps=3,
+    )
+    ctx = _ctx(max_steps=1)
+    await loop.run(ctx)
+
+    assert ctx.status == "failed"
+    assert ctx.reason == "finalization_tool_missing"

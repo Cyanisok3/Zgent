@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -52,6 +53,24 @@ def test_selector_prefers_latest_traceback(tmp_path: Path) -> None:
     assert selection.references[0].start > 0
 
 
+# 功能：验证 Selected Evidence 头部是可直接复制的三字段 EvidenceRef JSON
+# 设计：解析第一行并与 selector 生成的稳定 byte-range 对照，确保模型不会看到内部字段
+def test_selector_renders_copyable_three_field_reference(tmp_path: Path) -> None:
+    stdout = tmp_path / "stdout.log"
+    stderr = tmp_path / "stderr.log"
+    stdout.write_bytes(b"")
+    stderr.write_text("RuntimeError: root\n", encoding="utf-8")
+
+    selection = select_evidence(_capsule(tmp_path), stdout, stderr)
+    header = json.loads(selection.content.splitlines()[0])
+
+    assert set(header) == {"source", "reference", "description"}
+    assert header["source"] == "stderr"
+    assert header["reference"] == selection.references[0].as_reference(_capsule(tmp_path))
+    assert header["description"] == selection.references[0].selection_reason
+    assert "RuntimeError: root" in selection.content
+
+
 # 功能：验证 stderr 为空时 selector 稳定回退 stdout 尾部
 # 设计：不构造结构化错误，确认 fallback 仍给出可重定位引用且不超预算
 def test_selector_falls_back_to_stdout_tail(tmp_path: Path) -> None:
@@ -60,7 +79,7 @@ def test_selector_falls_back_to_stdout_tail(tmp_path: Path) -> None:
     stdout.write_text("training output\nfinal marker\n", encoding="utf-8")
     stderr.write_bytes(b"")
 
-    selection = select_evidence(_capsule(tmp_path), stdout, stderr, max_bytes=64)
+    selection = select_evidence(_capsule(tmp_path), stdout, stderr, max_bytes=256)
 
     assert selection.references[0].source == "stdout"
     assert selection.references[0].kind == "tail"

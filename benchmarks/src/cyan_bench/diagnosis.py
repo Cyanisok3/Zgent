@@ -20,7 +20,7 @@ from cyan_bench.models import (
     SelectionArtifact,
 )
 
-DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v3"
+DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v4"
 
 _SYSTEM = """You diagnose whether a local machine-learning training process failed.
 Use only the supplied process metadata and log evidence. There are no tools.

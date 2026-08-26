@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from cyan.agent.tools.base import BaseTool
 
 
@@ -15,8 +17,11 @@ class ToolRegistry:
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    # 返回所有工具的 Anthropic 格式 schema 列表
-    def tool_schemas(self) -> list[dict[str, object]]:
+    # 返回全部或指定工具的 Anthropic 格式 schema 列表
+    def tool_schemas(
+        self, names: Iterable[str] | None = None
+    ) -> list[dict[str, object]]:
+        selected = set(names) if names is not None else None
         return [
             {
                 "name": tool.name,
@@ -24,4 +29,5 @@ class ToolRegistry:
                 "input_schema": tool.input_schema,
             }
             for tool in self._tools.values()
+            if selected is None or tool.name in selected
         ]

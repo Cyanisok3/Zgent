@@ -108,8 +108,18 @@ class IncidentRuntime:
             profile=profile,
             run_path=self._store.run_dir(incident_id, run_id),
         )
-        diagnosis = self._store.read_incident(incident_id).diagnosis
-        proposal = self._store.read_incident(incident_id).proposal
+        current_incident = self._store.read_incident(incident_id)
+        diagnosis = current_incident.diagnosis
+        proposal = current_incident.proposal
+        if outcome.status == "success" and diagnosis is None:
+            outcome = RunOutcome(
+                status="failed",
+                result=outcome.result,
+                reason="diagnosis_missing",
+                initial_input_bytes=outcome.initial_input_bytes,
+                peak_input_bytes=outcome.peak_input_bytes,
+                budget_exhausted=outcome.budget_exhausted,
+            )
         def mark_finished(current: IncidentRun) -> None:
             current.status = outcome.status
             current.reason = outcome.reason

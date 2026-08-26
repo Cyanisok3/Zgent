@@ -42,7 +42,9 @@ class ExecutionContext:
         is_error: bool = False,
         *,
         tool_schemas: list[dict[str, object]] | None = None,
-    ) -> None:
+        soft_max_input_bytes: int | None = None,
+    ) -> bool:
+        reserve_reached = False
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": tool_use_id,
@@ -65,6 +67,22 @@ class ExecutionContext:
             last["content"] = [*last["content"], block]
         else:
             candidate.append({"role": "user", "content": [block]})
+
+        if (
+            soft_max_input_bytes is not None
+            and self.serialized_size(tool_schemas or [], messages=candidate)
+            > soft_max_input_bytes
+        ):
+            reserve_reached = True
+            block["content"] = json.dumps(
+                {
+                    "error": "finalization_reserve_reached",
+                    "tool_use_id": tool_use_id,
+                },
+                separators=(",", ":"),
+            )
+            block["is_error"] = True
+
         if self.serialized_size(tool_schemas or [], messages=candidate) > self.max_input_bytes:
             self.budget_exhausted = True
             block["content"] = json.dumps(
@@ -78,6 +96,11 @@ class ExecutionContext:
             if last is None or last.get("role") != "user":
                 candidate[-1] = {"role": "user", "content": [block]}
         self.messages = candidate
+        return reserve_reached
+
+    # 追加一条用于继续收尾的用户提示
+    def add_user_message(self, content: str) -> None:
+        self.messages.append({"role": "user", "content": content})
 
     # 计算 system、messages 和 tools 序列化后的 UTF-8 总大小
     def serialized_size(

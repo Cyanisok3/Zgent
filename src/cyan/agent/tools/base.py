@@ -13,6 +13,8 @@ class ToolResult:
     is_error: bool = False
     # "runtime_error" | "timeout" | "schema_error"
     error_type: str | None = None
+    # 成功后是否应立即结束本轮 Agent 运行
+    stop_after_success: bool = False
 
 
 class BaseTool(ABC):

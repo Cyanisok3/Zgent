@@ -141,6 +141,69 @@ async def test_submit_diagnosis_requires_causal_support_and_patch_intent(
         )
 
 
+# 功能：验证两个 Incident 工具暴露同一严格三字段 EvidenceRef schema
+# 设计：同时检查 JSON Schema 和 Pydantic 边界，防止模型复制 selector 内部字段后被拒
+def test_incident_tools_reject_internal_evidence_fields() -> None:
+    for tool_cls in (SubmitDiagnosisTool, ProposePatchTool):
+        schema = tool_cls.input_schema
+        evidence = schema["properties"]["evidence"]  # type: ignore[index]
+        item_schema = evidence["items"]  # type: ignore[index]
+        assert item_schema["required"] == ["source", "reference", "description"]
+        assert item_schema["additionalProperties"] is False
+        assert schema["additionalProperties"] is False
+
+    with pytest.raises(ValidationError):
+        SubmitDiagnosisTool.params_model.model_validate(
+            {
+                "category": "runtime",
+                "summary": "observed crash",
+                "root_cause": "the observed source causes the crash",
+                "evidence": [
+                    {
+                        "source": "stderr",
+                        "reference": "stderr:job-1/attempt-1@bytes:0-42",
+                        "description": "traceback",
+                        "kind": "traceback",
+                    }
+                ],
+                "confidence": 1.0,
+                "causal_support": "inferred",
+                "patch_recommended": False,
+            }
+        )
+
+
+# 功能：验证 Selected Evidence 的三字段对象可原样作为诊断和提案引用
+# 设计：只经过两个参数模型，不引入转换逻辑，确保 selector 与工具契约真正闭合
+def test_selected_evidence_reference_is_copyable() -> None:
+    evidence = [
+        {
+            "source": "stderr",
+            "reference": "stderr:job-1/attempt-1@bytes:0-42",
+            "description": "latest complete Python traceback",
+        }
+    ]
+    SubmitDiagnosisTool.params_model.model_validate(
+        {
+            "category": "runtime",
+            "summary": "observed crash",
+            "root_cause": "the observed source causes the crash",
+            "evidence": evidence,
+            "confidence": 1.0,
+            "causal_support": "inferred",
+            "patch_recommended": False,
+        }
+    )
+    ProposePatchTool.params_model.model_validate(
+        {
+            "path": "train.py",
+            "search": "old",
+            "replace": "new",
+            "evidence": evidence,
+        }
+    )
+
+
 # 功能：验证诊断工具拒绝 harness 未登记为已观察的证据引用
 # 设计：注入只接受单一 byte range 的 validator，提交另一范围并断言零 artifact 写入
 async def test_submit_diagnosis_rejects_unobserved_evidence(tmp_path: Path) -> None:

@@ -36,6 +36,20 @@ _WORKSPACE_REFERENCE = re.compile(
 )
 EvidenceValidator = Callable[[EvidenceRef], str | None]
 
+_EVIDENCE_REF_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "source": {
+            "type": "string",
+            "enum": ["stdout", "stderr", "workspace"],
+        },
+        "reference": {"type": "string"},
+        "description": {"type": "string"},
+    },
+    "required": ["source", "reference", "description"],
+    "additionalProperties": False,
+}
+
 
 class ProposePatchParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -148,21 +162,11 @@ class ProposePatchTool(BaseTool):
             },
             "evidence": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "enum": ["stdout", "stderr", "workspace"],
-                        },
-                        "reference": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["source", "reference", "description"],
-                },
+                "items": _EVIDENCE_REF_SCHEMA,
             },
         },
         "required": ["path", "search", "replace"],
+        "additionalProperties": False,
     }
 
     # 将工具绑定到单个 incident 和不可变 workspace root
@@ -297,7 +301,7 @@ class ProposePatchTool(BaseTool):
             except (OSError, PatchError, ValueError) as exc:
                 self._store.clear_proposal(self._incident_id)
                 return _validation_error(str(exc))
-        return ToolResult(content=proposal.model_dump_json())
+        return ToolResult(content=proposal.model_dump_json(), stop_after_success=True)
 
 
 class SubmitDiagnosisTool(BaseTool):
@@ -329,18 +333,7 @@ class SubmitDiagnosisTool(BaseTool):
             "root_cause": {"type": "string"},
             "evidence": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "enum": ["stdout", "stderr", "workspace"],
-                        },
-                        "reference": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["source", "reference", "description"],
-                },
+                "items": _EVIDENCE_REF_SCHEMA,
             },
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "causal_support": {
@@ -358,6 +351,7 @@ class SubmitDiagnosisTool(BaseTool):
             "causal_support",
             "patch_recommended",
         ],
+        "additionalProperties": False,
     }
 
     # 将诊断工具绑定到单个 incident artifact store
@@ -391,4 +385,9 @@ class SubmitDiagnosisTool(BaseTool):
             created_at=datetime.now(UTC),
         )
         self._store.write_diagnosis(diagnosis)
-        return ToolResult(content=diagnosis.model_dump_json())
+        return ToolResult(
+            content=diagnosis.model_dump_json(),
+            stop_after_success=(
+                parsed.causal_support == "inferred" or not parsed.patch_recommended
+            ),
+        )

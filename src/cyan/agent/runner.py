@@ -44,6 +44,12 @@ class RunProfile:
     max_steps: int
     max_input_bytes: int
     summary_only_events: bool = True
+    # 由业务 profile 指定收尾工具顺序，空序列保持通用 Agent 原语义
+    finalization_sequence: tuple[str, ...] = ()
+    # 为诊断和提案结果保留的软输入预算，零表示不启用
+    finalization_reserve_bytes: int = 0
+    # 触发收尾阶段时允许使用的最后步数，零表示不启用
+    finalization_steps: int = 0
 
 
 class AgentRunner:
@@ -103,7 +109,14 @@ class AgentRunner:
                         self._trace,
                         include_payload=False,
                     )
-                await AgentLoop(provider, registry, local_bus).run(context)
+                await AgentLoop(
+                    provider,
+                    registry,
+                    local_bus,
+                    finalization_sequence=profile.finalization_sequence,
+                    finalization_reserve_bytes=profile.finalization_reserve_bytes,
+                    finalization_steps=profile.finalization_steps,
+                ).run(context)
             except asyncio.CancelledError:
                 cancelled = True
                 if not context.is_done():

@@ -55,7 +55,10 @@ def _incident(tmp_path: Path) -> Incident:
 # 设计：检查固定 prompt 中没有历史会话或全局 context，并锁定两级预算常量
 def test_incident_context_contains_only_bounded_inputs(tmp_path: Path) -> None:
     selection = EvidenceSelection(
-        content="[stderr bytes=0-3 kind=tail]\nerr",
+        content=(
+            '{"source":"stderr","reference":"stderr:job-1/attempt-1@bytes:0-3",'
+            '"description":"stderr tail"}\nerr'
+        ),
         references=[],
         scanned_bytes=3,
         selected_bytes=3,

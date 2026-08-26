@@ -9,7 +9,7 @@ from cyan.training.incidents.selector import EvidenceSelection
 
 MAX_INPUT_BYTES = 128 * 1024
 MAX_INITIAL_EVIDENCE_BYTES = 32 * 1024
-INCIDENT_PROMPT_VERSION = "causal-support-abstention-v5"
+INCIDENT_PROMPT_VERSION = "causal-support-abstention-v6"
 
 
 @dataclass
@@ -42,6 +42,10 @@ def build_incident_context(
         "the workspace. Use read-only tools to verify causal evidence, then call "
         "submit_diagnosis exactly once. The diagnosis must include causal_support="
         "direct or inferred and patch_recommended=true or false.\n"
+        "Copy evidence items using exactly these three JSON fields; never add kind, "
+        "selection_reason, or sha256:\n"
+        '{"source":"stderr","reference":"stderr:job-1/attempt-1@bytes:0-42",'
+        '"description":"latest complete Python traceback"}\n'
         "When causal_support is direct, root_cause must trace to the earliest evidence-backed "
         "upstream configuration, data contract, component, or producer, not only the traceback "
         "leaf. When support is inferred, root_cause must begin with "
@@ -55,8 +59,8 @@ def build_incident_context(
         "multi-file fixes, or insufficient evidence, set it false and stop after diagnosis. "
         "Once the observed traceback and workspace producer establish the relevant contract, "
         "submit the diagnosis immediately; abstaining does not require exhaustively tracing "
-        "third-party framework internals. Use no more than six read-only tool calls before "
-        "submit_diagnosis, and do not draft a patch before submitting the diagnosis. After a "
+        "third-party framework internals. Use read-only tools only when they add causal "
+        "evidence, and do not draft a patch before submitting the diagnosis. After a "
         "successful direct diagnosis with patch_recommended=true, immediately call "
         "propose_patch using already observed source; otherwise stop. Preserve the input budget "
         "for submit_diagnosis and, when allowed, propose_patch. "

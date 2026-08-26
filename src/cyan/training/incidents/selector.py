@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -194,11 +195,23 @@ def _empty_stream() -> BinaryIO:
 
 
 # 将候选渲染为带稳定字节范围的上下文块
-def _render(candidate: _Candidate, content: bytes) -> str:
+def _render(candidate: _Candidate, content: bytes, capsule: FailureCapsule) -> str:
+    reference = (
+        f"{candidate.source}:{capsule.job_id}/{capsule.attempt_id}"
+        f"@bytes:{candidate.start}-{candidate.start + len(content)}"
+    )
+    header = json.dumps(
+        {
+            "source": candidate.source,
+            "reference": reference,
+            "description": candidate.reason,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return (
-        f"[{candidate.source} bytes={candidate.start}-"
-        f"{candidate.start + len(content)} kind={candidate.kind}]\n"
-        f"{content.decode('utf-8', errors='replace').rstrip(chr(10))}"
+        f"{header}\n"
+        f"{content.decode('utf-8', errors='replace')}"
     )
 
 
@@ -237,7 +250,7 @@ def select_evidence(
                 None,
             )
             if exception is not None and exception.content not in seen:
-                reserved = len(_render(exception, exception.content).encode("utf-8")) + 1
+                reserved = len(_render(exception, exception.content, capsule).encode("utf-8")) + 1
         available = max_bytes - reserved
         if len("\n".join(rendered).encode("utf-8")) >= available:
             if candidate.kind == "traceback":
@@ -255,7 +268,7 @@ def select_evidence(
                 content,
                 candidate.priority,
             )
-            block = _render(render_candidate, content)
+            block = _render(render_candidate, content, capsule)
             if len("\n".join([*rendered, block]).encode("utf-8")) <= available:
                 break
             overflow = len("\n".join([*rendered, block]).encode("utf-8")) - available
@@ -280,7 +293,7 @@ def select_evidence(
             candidate.priority,
         )
         selected.append(selected_candidate)
-        rendered.append(_render(selected_candidate, content))
+        rendered.append(_render(selected_candidate, content, capsule))
         selected_size += len(content)
     references = [
         EvidenceReference(

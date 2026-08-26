@@ -78,4 +78,7 @@ def build_incident_profile(
         max_steps=12,
         max_input_bytes=MAX_INPUT_BYTES,
         summary_only_events=True,
+        finalization_sequence=("submit_diagnosis", "propose_patch"),
+        finalization_reserve_bytes=24 * 1024,
+        finalization_steps=3,
     )

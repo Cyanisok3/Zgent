@@ -303,7 +303,7 @@ def test_incident_diagnosis_summary_is_bounded() -> None:
 
     assert summary[:4] == ("dtype", "direct cause", "direct", True)
     assert summary[4] == [{"source": "stderr", "reference": "bytes:1-2"}]
-    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v3"
+    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v4"
 
 
 # 功能：验证 Tail、BM25 与 Cyan Selector 均产生可回溯且有界的 evidence
