@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "environment",
+    "culprit": ["MultiDiscrete", "observation space", "nvec"],
+    "causal_mechanism": ["policy assumes one-dimensional observation dimensions", "nested nvec reaches features extractor construction"]
+  },
+  "causal_support": "direct",
+  "patch_recommended": false,
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "ValueError: The truth value of an array with more than one element is ambiguous"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "get_flattened_obs_dim"
+      }
+    ]
+  ]
+}

@@ -1,0 +1,13 @@
+diff --git a/cyan_bench_train.py b/cyan_bench_train.py
+index 3e7e850..4d6e44b 100644
+--- a/cyan_bench_train.py
++++ b/cyan_bench_train.py
+@@ -8,7 +8,7 @@ class MatrixObservationEnvironment(gym.Env[np.ndarray, np.ndarray]):
+ 
+     def __init__(self) -> None:
+         super().__init__()
+-        self.observation_space = gym.spaces.MultiDiscrete(np.array([[1, 2], [3, 4]], dtype=np.int64))
++        self.observation_space = gym.spaces.MultiDiscrete(np.array([1, 2, 3, 4], dtype=np.int64))
+         self.action_space = gym.spaces.MultiDiscrete(np.array([3, 4, 3, 4], dtype=np.int64))
+         self.state = self.observation_space.sample()
+ 
