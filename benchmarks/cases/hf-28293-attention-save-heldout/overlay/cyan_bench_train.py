@@ -2,7 +2,13 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset
-from transformers import BertConfig, BertForSequenceClassification, Trainer, TrainerCallback, TrainingArguments
+from transformers import (
+    BertConfig,
+    BertForSequenceClassification,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+)
 
 TRAIN_STEPS = 2
 

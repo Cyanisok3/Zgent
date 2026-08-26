@@ -45,8 +45,12 @@ def load_case(case_dir: Path) -> LoadedCase:
     return LoadedCase(case_dir.resolve(), manifest, expected)
 
 
-# 按稳定 ID 顺序读取指定 split 的全部案例
-def discover_cases(cases_root: Path, split: str | None = None) -> list[LoadedCase]:
+# 按稳定 ID 顺序读取指定 split 与数据集版本的案例
+def discover_cases(
+    cases_root: Path,
+    split: str | None = None,
+    dataset_version: str | None = None,
+) -> list[LoadedCase]:
     loaded = [
         load_case(path)
         for path in sorted(cases_root.iterdir())
@@ -54,6 +58,10 @@ def discover_cases(cases_root: Path, split: str | None = None) -> list[LoadedCas
     ]
     if split is not None:
         loaded = [case for case in loaded if case.manifest.split == split]
+    if dataset_version is not None:
+        loaded = [
+            case for case in loaded if case.manifest.dataset_version == dataset_version
+        ]
     ids = [case.manifest.id for case in loaded]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate case id")

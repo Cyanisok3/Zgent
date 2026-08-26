@@ -30,7 +30,10 @@ class Blocks(Dataset[dict[str, torch.Tensor]]):
 
 tokens = [1, *([4, 5, 6, 7, 8, 9] * 10), 2, 3]
 blocks = group_tokens(tokens)
-print(f"source_tokens={len(tokens)} grouped_blocks={len(blocks)} block_size={BLOCK_SIZE}", flush=True)
+print(
+    f"source_tokens={len(tokens)} grouped_blocks={len(blocks)} block_size={BLOCK_SIZE}",
+    flush=True,
+)
 model = BertForMaskedLM(
     BertConfig(
         vocab_size=32,

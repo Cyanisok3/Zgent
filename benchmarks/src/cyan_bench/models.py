@@ -14,6 +14,7 @@ Variant = Literal["buggy", "fixed", "control"]
 Baseline = Literal["full_native", "tail_32", "bm25_32", "cyan_selector_32", "oracle_32"]
 ControlRole = Literal["short_quiet", "long_clean", "warning_heavy"]
 TrainingDomain = Literal["llm", "general_ml"]
+DatasetVersion = Literal["formal-v1", "formal-v2"]
 
 
 class CaseManifest(BaseModel):
@@ -22,6 +23,7 @@ class CaseManifest(BaseModel):
     schema_version: Literal[1]
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,79}$")
     title: str = Field(min_length=1, max_length=200)
+    dataset_version: DatasetVersion = "formal-v1"
     split: Split
     framework: str = Field(min_length=1, max_length=80)
     training_domain: TrainingDomain
@@ -88,6 +90,9 @@ class ExpectedOutcome(BaseModel):
     schema_version: Literal[1]
     diagnosis: DiagnosisOracle
     required_groups: list[list[EvidenceAnchor]] = Field(min_length=1)
+    # formal-v2 必须显式提供；formal-v1 允许缺失
+    causal_support: Literal["direct", "inferred"] | None = None
+    patch_recommended: bool | None = None
 
     # 禁止空的 any-of 证据组，否则 recall 没有确定含义
     @model_validator(mode="after")
@@ -168,6 +173,8 @@ class SelectionArtifact(BaseModel):
 
 
 class DiagnosisAnswer(BaseModel):
+    """旧 formal-v1 宽松模型：diagnosis 为自由字典。"""
+
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["fault", "no_fault"]
@@ -177,6 +184,52 @@ class DiagnosisAnswer(BaseModel):
     # no_fault 必须对应空诊断与不建议修复
     @model_validator(mode="after")
     def _validate_abstention(self) -> DiagnosisAnswer:
+        if self.verdict == "no_fault" and (self.diagnosis is not None or self.patch_recommended):
+            raise ValueError("no_fault requires null diagnosis and patch_recommended=false")
+        if self.verdict == "fault" and self.diagnosis is None:
+            raise ValueError("fault requires diagnosis")
+        return self
+
+
+class DiagnosisEvidenceRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["stdout", "stderr"]
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+
+    # 拒绝空区间或反向区间
+    @model_validator(mode="after")
+    def _validate_range(self) -> DiagnosisEvidenceRef:
+        if self.end <= self.start:
+            raise ValueError("evidence end must be greater than start")
+        return self
+
+
+class StructuredDiagnosis(BaseModel):
+    """formal-v2 严格诊断：强制因果支撑、证据引用与补丁意图。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: str = Field(min_length=1, max_length=80)
+    culprit: str = Field(min_length=1, max_length=1000)
+    causal_mechanism: str = Field(min_length=1, max_length=4000)
+    causal_support: Literal["direct", "inferred"]
+    evidence: list[DiagnosisEvidenceRef] = Field(min_length=1, max_length=32)
+
+
+class DiagnosisAnswerV2(BaseModel):
+    """formal-v2 严格响应模型：诊断必须结构化且缺失字段时直接失败。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["fault", "no_fault"]
+    diagnosis: StructuredDiagnosis | None
+    patch_recommended: bool
+
+    # no_fault 必须对应空诊断与不建议修复
+    @model_validator(mode="after")
+    def _validate_abstention(self) -> DiagnosisAnswerV2:
         if self.verdict == "no_fault" and (self.diagnosis is not None or self.patch_recommended):
             raise ValueError("no_fault requires null diagnosis and patch_recommended=false")
         if self.verdict == "fault" and self.diagnosis is None:
@@ -197,7 +250,8 @@ class DiagnosisRunArtifact(BaseModel):
     model_requested: str
     model_resolved: str | None = None
     response_id: str | None = None
-    answer: DiagnosisAnswer | None = None
+    # 新运行解析为严格 V2；旧 formal-v1 artifact 回落为宽松 V1 模型
+    answer: DiagnosisAnswerV2 | DiagnosisAnswer | None = None
     raw_response_path: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)

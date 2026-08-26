@@ -6,7 +6,14 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import IterableDataset
-from transformers import BertConfig, BertLMHeadModel, BertTokenizerFast, Trainer, TrainerCallback, TrainingArguments
+from transformers import (
+    BertConfig,
+    BertLMHeadModel,
+    BertTokenizerFast,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+)
 
 NORMAL_SAMPLES = 20
 LOG_EVERY = 1

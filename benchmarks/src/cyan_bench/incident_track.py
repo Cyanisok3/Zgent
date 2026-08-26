@@ -219,6 +219,7 @@ async def run_incident_track(
     coordinator = IncidentCoordinator(jobs, supervisor, bus, get_config())
     error: str | None = None
     view: dict[str, Any] = {}
+    approval_view: dict[str, Any] | None = None
     job_id = "unstarted"
     fallback_job_status = "unstarted"
     try:
@@ -236,6 +237,8 @@ async def run_incident_track(
             view = await coordinator.job_view(job.id)
         else:
             view = await _wait_incident(coordinator, job.id, timeout_s=900)
+            # 审批前快照：abstention/Proposal 合法性只由此刻的 can_apply 决定
+            approval_view = dict(view)
             incident = view.get("incident")
             proposal = view.get("proposal")
             if (
@@ -260,12 +263,14 @@ async def run_incident_track(
         error = f"{type(exc).__name__}: {exc}"
     finally:
         await coordinator.close()
-    incident = view.get("incident")
-    proposal = view.get("proposal")
-    diagnosis = view.get("diagnosis")
+    final_incident = view.get("incident")
+    snapshot = approval_view if approval_view is not None else view
+    incident = snapshot.get("incident")
+    proposal = snapshot.get("proposal")
+    diagnosis = snapshot.get("diagnosis")
     final_job = view.get("job")
     job_id = str(final_job.get("id")) if isinstance(final_job, dict) else job_id
-    proposal_valid = bool(proposal) and bool(view.get("can_apply"))
+    proposal_valid = bool(proposal) and bool(snapshot.get("can_apply"))
     (
         diagnosis_category,
         diagnosis_root_cause,
@@ -295,14 +300,14 @@ async def run_incident_track(
         is_control=is_control,
         prompt_version=INCIDENT_PROMPT_VERSION,
         job_id=job_id,
-        incident_id=str(incident.get("id")) if isinstance(incident, dict) else None,
+        incident_id=str(final_incident.get("id")) if isinstance(final_incident, dict) else None,
         final_job_status=(
             str(final_job.get("status"))
             if isinstance(final_job, dict)
             else fallback_job_status
         ),
         final_incident_status=(
-            str(incident.get("status")) if isinstance(incident, dict) else None
+            str(final_incident.get("status")) if isinstance(final_incident, dict) else None
         ),
         spurious_incident=is_control and isinstance(incident, dict),
         diagnosis_present=isinstance(diagnosis, dict),
@@ -317,7 +322,7 @@ async def run_incident_track(
         correct_patch_abstention=correct_patch_abstention,
         missed_patch_opportunity=missed_patch_opportunity,
         abstention_gate_violated=abstention_gate_violated,
-        resolved=isinstance(incident, dict) and incident.get("status") == "resolved",
+        resolved=isinstance(final_incident, dict) and final_incident.get("status") == "resolved",
         capsule_tail_bytes=metrics[0],
         selector_selected_bytes=metrics[1],
         unique_evidence_bytes=metrics[2],

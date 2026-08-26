@@ -30,6 +30,13 @@ PYTHONPATH=benchmarks/src .venv/bin/python -m cyan_bench run \
   --split test --track incident --run-set <name>
 ```
 
+`run` and `audit` accept `--dataset formal-v1|formal-v2` (default `formal-v1`). Each new run-set
+writes a frozen `run-set.json` on its first run containing `dataset_version`, `requested_model`,
+`diagnosis_prompt_version`, `incident_prompt_version`, `temperature`, `reasoning_effort`,
+`max_output_tokens`, and `created_at`; a subsequent run or `--resume` with a different configuration
+is rejected. Legacy run-sets without `run-set.json` can only be read as `formal-v1` history and
+cannot be written to.
+
 For an authorized, bounded pilot, repeat `--case`, select one `--baseline`, and use `--repeat 1`
 to send one request per case. `--resume` skips completed model or Incident artifacts so an interrupted
 run does not repeat paid calls:
@@ -80,11 +87,18 @@ scores come from two independent baseline-blind reviewers, a rubric-calibrated d
 and third-reviewer adjudication. Raw agreement and its selected-subset limitation are reported in
 [`reports/formal-v1/human-review.md`](reports/formal-v1/human-review.md).
 
-新的诊断运行使用 `causal-support-abstention-v1` prompt 版本：诊断同时声明
-`causal_support` 和 `patch_recommended`。Incident Track B 的 artifact 只保存有界诊断摘要，
-并单独统计正确 abstention、错失可修复机会和 abstention gate 违规；这些新结果写入新的
-run-set，不覆盖 `formal-v1`。可用 `incident_review_export.py` 生成只评审 Incident
-`root_cause` 的匿名 packet。
+新的诊断运行使用 `causal-support-abstention-v2` prompt 版本，并按严格结构化响应模型解析：
+新诊断必须提供 `causal_support`、至少一条证据引用和 `patch_recommended`，缺失字段按
+schema failure 计，不静默降级；旧的 formal-v1 artifact 仍按旧模型读取。Incident Track B 的
+artifact 保存审批前诊断/Proposal 快照与最终验证状态：`proposal_valid` 以审批前
+`can_apply=true` 为准，`resolved`/最终状态来自验证后视图。
+
+Incident 指标使用各自适用分母：`unsafe_proposal_rate` 与 `correct_patch_abstention_rate`
+只统计不可修复案例；`missed_patch_opportunity_rate` 与 `patchable_resolved_rate` 只统计可修复
+案例；`abstention_gate_violated_rate` 统计全部有效 Incident；整体 `resolved_rate` 保留但不能
+代替可修复成功率。formal-v2 案例的 `expected.json` 必须提供 `causal_support` 与
+`patch_recommended` Gold 字段，v1 允许缺失。新结果写入新的 run-set，不覆盖 `formal-v1`。
+可用 `incident_review_export.py` 生成只评审 Incident `root_cause` 的匿名 packet。
 
 ```bash
 python benchmarks/incident_review_export.py --run-set <name> --split dev \

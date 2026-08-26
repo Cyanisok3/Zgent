@@ -20,8 +20,17 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# 读取案例 manifest 和 Gold 诊断责任点
-def _load_cases() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+# 读取 run-set 固定数据集版本；旧 run-set 无配置文件时按 formal-v1 处理
+def _dataset_version(run_set: str) -> str:
+    run_set_json = ARTIFACTS_DIR / "run-sets" / run_set / "run-set.json"
+    if run_set_json.is_file():
+        return str(_read_json(run_set_json).get("dataset_version", "formal-v1"))
+    return "formal-v1"
+
+
+# 读取案例 manifest 和 Gold 诊断责任点，并按 run-set 数据集版本过滤
+def _load_cases(run_set: str) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    dataset_version = _dataset_version(run_set)
     manifests: dict[str, dict[str, Any]] = {}
     expected: dict[str, dict[str, Any]] = {}
     for case_dir in sorted(CASES_DIR.iterdir()):
@@ -30,6 +39,8 @@ def _load_cases() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
         if not manifest_path.is_file() or not expected_path.is_file():
             continue
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("dataset_version", "formal-v1") != dataset_version:
+            continue
         case_id = str(manifest["id"])
         manifests[case_id] = manifest
         expected[case_id] = _read_json(expected_path)
@@ -91,7 +102,7 @@ def _item_id(run_set: str, artifact: dict[str, Any]) -> str:
 
 # 导出仅使用 Incident root_cause 的最小人工评审包
 def export_packet(run_set: str, split: str, output: Path, key_path: Path) -> None:
-    manifests, expected = _load_cases()
+    manifests, expected = _load_cases(run_set)
     root = ARTIFACTS_DIR / "run-sets" / run_set / "incident"
     artifacts = []
     for path in sorted(root.glob("*/*/*/incident-benchmark.json")):

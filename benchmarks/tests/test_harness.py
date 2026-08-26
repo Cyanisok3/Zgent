@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -10,9 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cyan_bench.admission import admit_case
+from cyan_bench.audit import audit_dataset
 from cyan_bench.baselines import select_baseline
 from cyan_bench.cases import case_fingerprint, discover_cases, load_case, resolve_anchors
-from cyan_bench.cli import _incident_complete, _parser
+from cyan_bench.cli import _freeze_run_set, _incident_complete, _parser
 from cyan_bench.diagnosis import DIAGNOSIS_PROMPT_VERSION
 from cyan_bench.execution import discard_workspace, prepare_workspace
 from cyan_bench.incident_track import (
@@ -20,9 +22,13 @@ from cyan_bench.incident_track import (
     _wait_verification,
     run_incident_track,
 )
-from cyan_bench.models import IncidentBenchmarkArtifact, ProcessCapture
+from cyan_bench.models import (
+    DiagnosisAnswerV2,
+    IncidentBenchmarkArtifact,
+    ProcessCapture,
+)
 from cyan_bench.paths import BenchmarkPaths, benchmark_paths
-from cyan_bench.reporting import build_report
+from cyan_bench.reporting import _incident_macro, build_report
 from cyan_bench.scoring import score_selection
 
 
@@ -130,6 +136,8 @@ def _fixture_case(tmp_path: Path) -> tuple[Path, BenchmarkPaths]:
     (case_dir / "fix.patch").write_text(fix, encoding="utf-8")
     env_python = tmp_path / "envs" / "fixture-env" / ".venv" / "bin" / "python"
     env_python.parent.mkdir(parents=True)
+    if env_python.is_symlink() or env_python.exists():
+        env_python.unlink()
     os.symlink(sys.executable, env_python)
     (tmp_path / "envs" / "fixture-env" / "uv.lock").write_text(
         "fixture-lock\n", encoding="utf-8"
@@ -179,7 +187,7 @@ def test_incident_diagnosis_summary_is_bounded() -> None:
 
     assert summary[:4] == ("dtype", "direct cause", "direct", True)
     assert summary[4] == [{"source": "stderr", "reference": "bytes:1-2"}]
-    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v1"
+    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v2"
 
 
 # 功能：验证 Tail、BM25 与 Cyan Selector 均产生可回溯且有界的 evidence
@@ -509,7 +517,7 @@ def test_incident_resume_retries_llm_error(tmp_path: Path) -> None:
     assert _incident_complete(artifact_path) is False
 
 
-# 功能：验证正式运行可显式限制案例、baseline 并启用断点续跑
+# 功能：验证 CLI 支持有界、可续跑的运行
 # 设计：只解析 CLI，不启动模型或训练进程
 def test_cli_supports_bounded_resumable_runs() -> None:
     args = _parser().parse_args(
@@ -535,3 +543,327 @@ def test_cli_supports_bounded_resumable_runs() -> None:
     assert args.baseline == ["full_native"]
     assert args.repeat == [1]
     assert args.resume is True
+
+
+# 把 fixture 复制为指定数据集版本与 ID 的 v2 案例（fixture 不存在时才创建）
+def _fixture_case_v2(
+    tmp_path: Path,
+    case_id: str,
+    gold_support: str | None = "direct",
+    gold_patch: bool | None = True,
+    split: str = "dev",
+    patchable: bool = False,
+) -> tuple[Path, BenchmarkPaths]:
+    case_dir = tmp_path / "cases" / "fixture-fault"
+    if not (case_dir / "case.toml").is_file():
+        _fixture_case(tmp_path)
+    paths = _paths_of(tmp_path)
+    v2_dir = tmp_path / "cases" / case_id
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("fault.patch", "fix.patch", "case.toml", "expected.json"):
+        shutil.copy2(case_dir / name, v2_dir / name)
+    manifest = (v2_dir / "case.toml").read_text(encoding="utf-8")
+    manifest = manifest.replace('id = "fixture-fault"', f'id = "{case_id}"')
+    manifest = manifest.replace('split = "dev"', f'split = "{split}"')
+    manifest = manifest.replace("patchable = true", f"patchable = {str(patchable).lower()}")
+    manifest = manifest.replace(
+        'schema_version = 1', 'schema_version = 1\ndataset_version = "formal-v2"'
+    )
+    (v2_dir / "case.toml").write_text(manifest, encoding="utf-8")
+    expected = json.loads((v2_dir / "expected.json").read_text(encoding="utf-8"))
+    if gold_support is not None:
+        expected["causal_support"] = gold_support
+    if gold_patch is not None:
+        expected["patch_recommended"] = gold_patch
+    (v2_dir / "expected.json").write_text(
+        json.dumps(expected, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return v2_dir, paths
+
+
+# 功能：验证 formal-v1 与 formal-v2 案例发现互不污染且 rejected 不入集
+# 设计：同目录放置 v1 fixture 与 v2 副本及一个 REJECTED.md 目录
+def test_dataset_versions_are_isolated(tmp_path: Path) -> None:
+    _fixture_case_v2(tmp_path, "v2-abstain-case", split="dev", patchable=False)
+    rejected = tmp_path / "cases" / "rejected-case"
+    rejected.mkdir()
+    (rejected / "REJECTED.md").write_text("rejected", encoding="utf-8")
+    paths = _paths_of(tmp_path)
+
+    v1 = discover_cases(paths.cases, dataset_version="formal-v1")
+    v2 = discover_cases(paths.cases, dataset_version="formal-v2")
+
+    assert [case.manifest.id for case in v1] == ["fixture-fault"]
+    assert [case.manifest.id for case in v2] == ["v2-abstain-case"]
+    assert not any(case.manifest.id == "rejected-case" for case in v1 + v2)
+
+
+# 功能：验证 formal-v2 审计要求 Gold 同时提供 causal_support 与 patch_recommended
+# 设计：v2 案例缺 Gold 字段时 audit 必须列出该案例且 ready 为 False
+def test_audit_v2_requires_gold_fields(tmp_path: Path) -> None:
+    _fixture_case_v2(
+        tmp_path,
+        "v2-missing-gold",
+        gold_support=None,
+        gold_patch=None,
+        split="test",
+        patchable=True,
+    )
+
+    result = audit_dataset(
+        _paths_of(tmp_path), dataset_version="formal-v2"
+    )
+
+    assert any(
+        "v2-missing-gold" in reason and "missing causal_support/patch_recommended" in reason
+        for reason in result["reasons"]
+    )
+
+
+# 从 fixture 路径构造 BenchmarkPaths（复用 fixture 目录结构）
+def _paths_of(tmp_path: Path) -> BenchmarkPaths:
+    return BenchmarkPaths(
+        root=tmp_path,
+        cases=tmp_path / "cases",
+        environments=tmp_path / "envs",
+        cache=tmp_path / "cache",
+        artifacts=tmp_path / "artifacts",
+    )
+
+
+# 功能：验证 run-set.json 配置不一致或向旧 run-set 写 v2 时拒绝续跑
+# 设计：先冻结再改模型/版本，以及旧 run-set 无配置文件但已有 artifact
+def test_run_set_config_mismatch_rejects_resume(tmp_path: Path) -> None:
+    _fixture_case(tmp_path)
+    paths = _paths_of(tmp_path)
+    run_root = paths.artifacts / "run-sets" / "dev-v2"
+
+    _freeze_run_set(run_root, "formal-v2", "deepseek-v4-flash")
+    _freeze_run_set(run_root, "formal-v2", "deepseek-v4-flash")
+
+    try:
+        _freeze_run_set(run_root, "formal-v2", "another-model")
+        raise AssertionError("model mismatch was not rejected")
+    except SystemExit:
+        pass
+    try:
+        _freeze_run_set(run_root, "formal-v1", "deepseek-v4-flash")
+        raise AssertionError("dataset mismatch was not rejected")
+    except SystemExit:
+        pass
+
+    legacy = paths.artifacts / "run-sets" / "legacy-v1"
+    (legacy / "diagnosis/x/buggy/1/tail_32").mkdir(parents=True)
+    (legacy / "diagnosis/x/buggy/1/tail_32/diagnosis.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    # 旧 run-set 无 run-set.json 时只允许作为历史结果读取，任何运行写入都被拒绝
+    for dataset in ("formal-v1", "formal-v2"):
+        try:
+            _freeze_run_set(legacy, dataset, "deepseek-v4-flash")
+            raise AssertionError(f"legacy run-set accepted a {dataset} write")
+        except SystemExit:
+            pass
+
+
+# 功能：验证 Track A 严格模型对缺失 causal_support/evidence/patch_recommended 直接失败
+# 设计：三种非法响应都必须抛 ValueError，合法响应可解析
+def test_track_a_strict_model_rejects_missing_fields() -> None:
+    valid = {
+        "verdict": "fault",
+        "diagnosis": {
+            "category": "data",
+            "culprit": "items",
+            "causal_mechanism": "out of range",
+            "causal_support": "direct",
+            "evidence": [{"source": "stderr", "start": 0, "end": 1}],
+        },
+        "patch_recommended": True,
+    }
+    assert isinstance(
+        DiagnosisAnswerV2.model_validate_json(json.dumps(valid)), DiagnosisAnswerV2
+    )
+    missing_support = json.loads(json.dumps(valid))
+    del missing_support["diagnosis"]["causal_support"]
+    try:
+        DiagnosisAnswerV2.model_validate_json(json.dumps(missing_support))
+        raise AssertionError("missing causal_support accepted")
+    except ValueError:
+        pass
+    missing_evidence = json.loads(json.dumps(valid))
+    missing_evidence["diagnosis"]["evidence"] = []
+    try:
+        DiagnosisAnswerV2.model_validate_json(json.dumps(missing_evidence))
+        raise AssertionError("missing evidence accepted")
+    except ValueError:
+        pass
+    missing_intent = json.loads(json.dumps(valid))
+    del missing_intent["patch_recommended"]
+    try:
+        DiagnosisAnswerV2.model_validate_json(json.dumps(missing_intent))
+        raise AssertionError("missing patch_recommended accepted")
+    except ValueError:
+        pass
+
+
+# 功能：验证 resolved 后仍保留审批前 Proposal 合法性
+# 设计：同一案例写两条 resolved 结果（proposal_valid 一真一假），proposal_valid 与 resolved 独立
+def test_proposal_valid_preserved_after_resolved(tmp_path: Path) -> None:
+    case_dir, paths = _fixture_case(tmp_path)
+    manifest = case_dir / "case.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('split = "dev"', 'split = "test"'),
+        encoding="utf-8",
+    )
+    output_root = paths.artifacts / "run-sets/props-valid/incident/fixture-fault/buggy"
+    for repeat, proposal_valid in ((1, True), (2, False)):
+        output = output_root / str(repeat) / "incident-benchmark.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            IncidentBenchmarkArtifact(
+                case_id="fixture-fault",
+                repeat=repeat,
+                is_control=False,
+                job_id=f"job-{repeat}",
+                final_job_status="succeeded",
+                final_incident_status="resolved",
+                spurious_incident=False,
+                diagnosis_present=True,
+                proposal_present=proposal_valid,
+                proposal_valid=proposal_valid,
+                unsafe_proposal=False,
+                resolved=True,
+                capsule_tail_bytes=100,
+                selector_selected_bytes=100,
+                unique_evidence_bytes=100,
+                peak_input_bytes=100,
+                input_tokens=100,
+                output_tokens=50,
+                tool_calls=1,
+                duration_seconds=1.0,
+                created_at=datetime.now(UTC),
+            ).model_dump_json(),
+            encoding="utf-8",
+        )
+
+    report = build_report("props-valid", paths)
+    incident = report["incident_test"]
+    assert isinstance(incident, dict)
+    assert incident["resolved_rate"]["macro_mean"] == 1.0
+    assert incident["proposal_valid_rate"]["macro_mean"] == 0.5
+    assert incident["proposal_valid_rate"]["cases"] == 1
+
+
+# 功能：验证四个 abstention 指标使用各自适用分母
+# 设计：构造 patchable 与非 patchable 混合记录，检查 macro 只在对应人群内平均
+def test_abstention_metrics_use_correct_denominators() -> None:
+    records = [
+        {
+            "case_id": "patch-a",
+            "patchable": True,
+            "resolved": True,
+            "proposal_valid": True,
+            "unsafe_proposal": False,
+            "correct_patch_abstention": False,
+            "missed_patch_opportunity": False,
+            "patchable_resolved": True,
+            "abstention_gate_violated": False,
+        },
+        {
+            "case_id": "patch-b",
+            "patchable": True,
+            "resolved": False,
+            "proposal_valid": False,
+            "unsafe_proposal": False,
+            "correct_patch_abstention": False,
+            "missed_patch_opportunity": True,
+            "patchable_resolved": False,
+            "abstention_gate_violated": False,
+        },
+        {
+            "case_id": "nopatch-a",
+            "patchable": False,
+            "resolved": False,
+            "proposal_valid": False,
+            "unsafe_proposal": True,
+            "correct_patch_abstention": False,
+            "missed_patch_opportunity": True,
+            "abstention_gate_violated": True,
+        },
+        {
+            "case_id": "nopatch-b",
+            "patchable": False,
+            "resolved": False,
+            "proposal_valid": False,
+            "unsafe_proposal": False,
+            "correct_patch_abstention": True,
+            "missed_patch_opportunity": True,
+            "abstention_gate_violated": False,
+        },
+    ]
+
+    assert _incident_macro(records, "unsafe_proposal")["macro_mean"] == 0.5
+    assert _incident_macro(records, "correct_patch_abstention")["macro_mean"] == 0.5
+    assert _incident_macro(records, "missed_patch_opportunity")["macro_mean"] == 0.5
+    assert _incident_macro(records, "patchable_resolved")["macro_mean"] == 0.5
+    assert _incident_macro(records, "abstention_gate_violated")["macro_mean"] == 0.25
+    assert _incident_macro(records, "resolved")["macro_mean"] == 0.25
+    assert _incident_macro(records, "unsafe_proposal")["cases"] == 2
+    assert _incident_macro(records, "missed_patch_opportunity")["cases"] == 2
+    assert _incident_macro(records, "abstention_gate_violated")["cases"] == 4
+
+
+# 功能：验证历史 formal-v1 报告仍可读取且旧 run-set 只读为 formal-v1 历史
+# 设计：无 run-set.json 的 run-set 构建报告默认 formal-v1；v2 数据集写入被拒绝
+def test_legacy_run_set_report_still_readable(tmp_path: Path) -> None:
+    case_dir, paths = _fixture_case(tmp_path)
+    manifest = case_dir / "case.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('split = "dev"', 'split = "test"'),
+        encoding="utf-8",
+    )
+    output = (
+        paths.artifacts
+        / "run-sets/legacy-v1/incident/fixture-fault/buggy/1/incident-benchmark.json"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        IncidentBenchmarkArtifact(
+            case_id="fixture-fault",
+            repeat=1,
+            is_control=False,
+            job_id="job-1",
+            final_job_status="failed",
+            spurious_incident=False,
+            diagnosis_present=False,
+            proposal_present=False,
+            proposal_valid=False,
+            unsafe_proposal=False,
+            resolved=False,
+            capsule_tail_bytes=0,
+            selector_selected_bytes=0,
+            unique_evidence_bytes=0,
+            peak_input_bytes=0,
+            input_tokens=0,
+            output_tokens=0,
+            tool_calls=0,
+            duration_seconds=1.0,
+            created_at=datetime.now(UTC),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    report = build_report("legacy-v1", paths)
+
+    assert report["dataset_version"] == "formal-v1"
+    assert report["run_set_has_config"] is False
+    assert report["incident_completeness"]["test_expected"] == 3
+    try:
+        _freeze_run_set(
+            paths.artifacts / "run-sets" / "legacy-v1",
+            "formal-v2",
+            "deepseek-v4-flash",
+        )
+        raise AssertionError("legacy run-set accepted a v2 write")
+    except SystemExit:
+        pass

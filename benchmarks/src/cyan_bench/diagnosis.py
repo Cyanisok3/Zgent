@@ -14,13 +14,13 @@ from cyan.config import get_config
 from cyan_bench.baselines import capsule_metadata
 from cyan_bench.cases import LoadedCase
 from cyan_bench.models import (
-    DiagnosisAnswer,
+    DiagnosisAnswerV2,
     DiagnosisRunArtifact,
     ProcessCapture,
     SelectionArtifact,
 )
 
-DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v1"
+DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v2"
 
 _SYSTEM = """You diagnose whether a local machine-learning training process failed.
 Use only the supplied process metadata and log evidence. There are no tools.
@@ -39,12 +39,14 @@ Return exactly one JSON object and no Markdown:
 For a successful run without causal failure evidence, use no_fault, null, and false.
 When causal_support is direct, locate the earliest evidence-backed upstream configuration,
 data contract, component, or producer rather than only the traceback leaf. When it is inferred,
-root_cause must begin with "Inference — not directly established by observed evidence:" and
+culprit must begin with "Inference — not directly established by observed evidence:" and
 must not invent an unobserved file, setting, variable, or dependency version.
 Set patch_recommended=true only when the observed cause is a local workspace change in one
 existing file with one exact replacement and the original command can verify it. For external
 data, environment or framework limitations, dependency changes, multi-file fixes, or insufficient
-evidence, set patch_recommended=false. Do not infer a patch merely because warnings exist."""
+evidence, set patch_recommended=false. Do not infer a patch merely because warnings exist.
+The evidence array must contain at least one {"source", "start", "end"} reference to the log
+bytes that support your diagnosis."""
 
 DIAGNOSIS_MAX_OUTPUT_TOKENS = 8192
 DIAGNOSIS_TEMPERATURE = 0
@@ -119,7 +121,7 @@ async def run_diagnosis(
             error = str(exc)
             if attempts < 3:
                 await asyncio.sleep(float(attempts))
-    answer: DiagnosisAnswer | None = None
+    answer: DiagnosisAnswerV2 | None = None
     raw_path: str | None = None
     if response is not None:
         raw = _response_text(response)
@@ -127,7 +129,8 @@ async def run_diagnosis(
         raw_file.write_text(raw, encoding="utf-8")
         raw_path = raw_file.name
         try:
-            answer = DiagnosisAnswer.model_validate_json(raw)
+            # 新运行强制严格结构化诊断；缺 causal_support/evidence/patch_recommended 即 schema_error
+            answer = DiagnosisAnswerV2.model_validate_json(raw)
             status = "success"
         except ValueError as exc:
             status = "schema_error"

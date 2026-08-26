@@ -105,9 +105,12 @@ def _has_observed_ten_k_tokens(case: LoadedCase, paths: BenchmarkPaths) -> bool:
     return False
 
 
-# 审计 v1 数据集配额与已落盘的真实性证据
-def audit_dataset(paths: BenchmarkPaths) -> dict[str, object]:
-    cases = discover_cases(paths.cases)
+# 审计指定数据集版本的配额与已落盘的真实性证据
+def audit_dataset(
+    paths: BenchmarkPaths,
+    dataset_version: str = "formal-v1",
+) -> dict[str, object]:
+    cases = discover_cases(paths.cases, dataset_version=dataset_version)
     split_counts = Counter(case.manifest.split for case in cases)
     stage_counts = Counter(case.manifest.failure_stage for case in cases)
     mechanism_counts = Counter(case.manifest.mechanism_id for case in cases)
@@ -119,46 +122,106 @@ def audit_dataset(paths: BenchmarkPaths) -> dict[str, object]:
     long_tokens = [case.manifest.id for case in cases if _has_observed_ten_k_tokens(case, paths)]
     wide_evidence = [case.manifest.id for case in cases if _has_wide_evidence_span(case, paths)]
     reasons: list[str] = []
-    if split_counts != Counter({"dev": 6, "test": 9}):
-        reasons.append(f"split quota is {dict(split_counts)}, expected dev=6/test=9")
-    control_roles_valid = set(control_counts) == _CONTROL_ROLES and all(
-        value == 1 for value in control_counts.values()
-    )
-    if not control_roles_valid:
-        reasons.append("control roles must contain short_quiet, long_clean and warning_heavy once")
-    llm_cases = sum(case.manifest.training_domain == "llm" for case in cases)
-    if llm_cases < 10:
-        reasons.append("fewer than 10 LLM training cases")
-    stage_quota_valid = (
-        stage_counts["startup"] <= 4
-        and stage_counts["mid_run"] >= 6
-        and stage_counts["finalization"] >= 4
-    )
-    if not stage_quota_valid:
-        reasons.append(f"failure-stage quota is {dict(stage_counts)}")
-    no_safe_patch = sum(not case.manifest.patchable for case in cases)
-    if no_safe_patch < 3:
-        reasons.append("fewer than 3 no-safe-single-file-patch cases")
-    duplicates = sorted(name for name, count in mechanism_counts.items() if count > 2)
-    if duplicates:
-        reasons.append(f"mechanisms repeated more than twice: {duplicates}")
-    if len(admitted) != 15:
-        reasons.append(f"only {len(admitted)}/15 cases passed three-repeat admission")
-    if len(long_bytes) < 4:
-        reasons.append(f"only {len(long_bytes)}/4 cases have observed logs >=40 KiB")
-    if len(long_tokens) < 4:
-        reasons.append(f"only {len(long_tokens)}/4 cases have API-verified input >10k tokens")
-    if len(wide_evidence) < 2:
-        reasons.append(f"only {len(wide_evidence)}/2 cases have required evidence span >32 KiB")
+    if dataset_version == "formal-v1":
+        if split_counts != Counter({"dev": 6, "test": 9}):
+            reasons.append(f"split quota is {dict(split_counts)}, expected dev=6/test=9")
+        control_roles_valid = set(control_counts) == _CONTROL_ROLES and all(
+            value == 1 for value in control_counts.values()
+        )
+        if not control_roles_valid:
+            reasons.append(
+                "control roles must contain short_quiet, long_clean and warning_heavy once"
+            )
+        llm_cases = sum(case.manifest.training_domain == "llm" for case in cases)
+        if llm_cases < 10:
+            reasons.append("fewer than 10 LLM training cases")
+        stage_quota_valid = (
+            stage_counts["startup"] <= 4
+            and stage_counts["mid_run"] >= 6
+            and stage_counts["finalization"] >= 4
+        )
+        if not stage_quota_valid:
+            reasons.append(f"failure-stage quota is {dict(stage_counts)}")
+        no_safe_patch = sum(not case.manifest.patchable for case in cases)
+        if no_safe_patch < 3:
+            reasons.append("fewer than 3 no-safe-single-file-patch cases")
+        duplicates = sorted(name for name, count in mechanism_counts.items() if count > 2)
+        if duplicates:
+            reasons.append(f"mechanisms repeated more than twice: {duplicates}")
+        if len(admitted) != 15:
+            reasons.append(f"only {len(admitted)}/15 cases passed three-repeat admission")
+        if len(long_bytes) < 4:
+            reasons.append(f"only {len(long_bytes)}/4 cases have observed logs >=40 KiB")
+        if len(long_tokens) < 4:
+            reasons.append(f"only {len(long_tokens)}/4 cases have API-verified input >10k tokens")
+        if len(wide_evidence) < 2:
+            reasons.append(f"only {len(wide_evidence)}/2 cases have required evidence span >32 KiB")
+    else:
+        # formal-v2：强制 Gold 字段，要求 2 个 dev abstain、5 个 test held-out
+        missing_gold = [
+            case.manifest.id
+            for case in cases
+            if case.expected.causal_support is None or case.expected.patch_recommended is None
+        ]
+        if missing_gold:
+            reasons.append(
+                f"formal-v2 cases missing causal_support/patch_recommended gold: {missing_gold}"
+            )
+        dev_cases = [case for case in cases if case.manifest.split == "dev"]
+        test_cases = [case for case in cases if case.manifest.split == "test"]
+        dev_abstain = [case.manifest.id for case in dev_cases if not case.manifest.patchable]
+        if len(dev_abstain) < 2:
+            reasons.append(f"formal-v2 dev needs >=2 non-patchable cases, got {dev_abstain}")
+        test_abstain = [case.manifest.id for case in test_cases if not case.manifest.patchable]
+        test_patchable = [case.manifest.id for case in test_cases if case.manifest.patchable]
+        if len(test_cases) != 5:
+            reasons.append(
+                f"formal-v2 test must have exactly 5 held-out cases, got {len(test_cases)}"
+            )
+        if len(test_abstain) < 2:
+            reasons.append(f"formal-v2 test needs >=2 abstain cases, got {test_abstain}")
+        if len(test_patchable) < 3:
+            reasons.append(f"formal-v2 test needs >=3 patchable cases, got {test_patchable}")
+        test_direct = [
+            case.manifest.id
+            for case in test_cases
+            if case.expected.causal_support == "direct"
+        ]
+        test_inferred = [
+            case.manifest.id
+            for case in test_cases
+            if case.expected.causal_support == "inferred"
+        ]
+        if not test_direct:
+            reasons.append("formal-v2 test needs at least one direct-causal-support gold")
+        if not test_inferred:
+            reasons.append("formal-v2 test needs at least one inferred-causal-support gold")
+        expected_total = len(cases)
+        if len(admitted) != expected_total:
+            reasons.append(
+                "only "
+                f"{len(admitted)}/{expected_total} formal-v2 cases passed three-repeat admission"
+            )
+        if len(long_bytes) < 2:
+            reasons.append(f"only {len(long_bytes)}/2 formal-v2 cases have observed logs >=40 KiB")
+        if len(long_tokens) < 2:
+            reasons.append(
+                f"only {len(long_tokens)}/2 formal-v2 cases have API-verified input >10k tokens"
+            )
+        if len(wide_evidence) < 1:
+            reasons.append(
+                f"only {len(wide_evidence)}/1 formal-v2 cases have required evidence span >32 KiB"
+            )
     return {
         "schema_version": 1,
+        "dataset_version": dataset_version,
         "ready": not reasons,
         "reasons": reasons,
         "case_count": len(cases),
         "split_counts": dict(split_counts),
         "stage_counts": dict(stage_counts),
-        "llm_cases": llm_cases,
-        "no_safe_patch_cases": no_safe_patch,
+        "llm_cases": sum(case.manifest.training_domain == "llm" for case in cases),
+        "no_safe_patch_cases": sum(not case.manifest.patchable for case in cases),
         "control_roles": dict(control_counts),
         "admitted_case_ids": admitted,
         "observed_long_log_case_ids": long_bytes,
