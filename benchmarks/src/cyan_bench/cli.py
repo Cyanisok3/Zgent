@@ -4,10 +4,11 @@ import argparse
 import asyncio
 import json
 import shutil
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cyan.config import get_config
+from cyan.training.incidents.context import INCIDENT_PROMPT_VERSION
 
 from cyan_bench.admission import admit_case
 from cyan_bench.audit import audit_dataset
@@ -26,7 +27,7 @@ from cyan_bench.execution import (
     prepare_repository,
     prepare_workspace,
 )
-from cyan_bench.incident_track import INCIDENT_PROMPT_VERSION, run_incident_track
+from cyan_bench.incident_track import run_incident_track
 from cyan_bench.models import (
     Baseline,
     DiagnosisRunArtifact,
@@ -253,11 +254,19 @@ async def _run_incident_track(args: argparse.Namespace, paths: BenchmarkPaths) -
 
 
 # 冻结 run-set 固定配置；配置不一致或向旧 run-set 写入 v2 时拒绝
-def _freeze_run_set(run_root: Path, dataset_version: str, requested_model: str) -> None:
+def _freeze_run_set(
+    run_root: Path,
+    dataset_version: str,
+    split: str,
+    selected_case_ids: tuple[str, ...],
+    requested_model: str,
+) -> None:
     run_root.mkdir(parents=True, exist_ok=True)
     path = run_root / "run-set.json"
     expected: dict[str, object] = {
         "dataset_version": dataset_version,
+        "split": split,
+        "selected_case_ids": list(selected_case_ids),
         "requested_model": requested_model,
         "diagnosis_prompt_version": DIAGNOSIS_PROMPT_VERSION,
         "incident_prompt_version": INCIDENT_PROMPT_VERSION,
@@ -280,28 +289,34 @@ def _freeze_run_set(run_root: Path, dataset_version: str, requested_model: str) 
             f"legacy run-set {run_root.name} has artifacts but no run-set.json; "
             "it can only be read as formal-v1 history, use a new run-set name"
         )
-    expected["created_at"] = json.dumps(_now_iso(), ensure_ascii=False)
-    path.write_text(json.dumps(expected, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    expected["created_at"] = _now_iso()
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(expected, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 # 返回当前本地时间的 ISO 字符串
 def _now_iso() -> str:
-    from datetime import datetime
-
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 # 分派无工具 diagnosis 或当前完整 Incident track
 def _run(args: argparse.Namespace, paths: BenchmarkPaths) -> None:
-    requested_model = str(args.model or get_config().llm.default_model)
+    if args.track == "incident" and args.baseline:
+        raise SystemExit("--baseline is only valid for the diagnosis track")
+    cases = _selected_cases(args, paths)
+    requested_model = str(get_config().llm.default_model)
     _freeze_run_set(
         paths.artifacts / "run-sets" / args.run_set,
         str(args.dataset),
+        str(args.split),
+        tuple(sorted(case.manifest.id for case in cases)),
         requested_model,
     )
     if args.track == "incident":
-        if args.baseline:
-            raise SystemExit("--baseline is only valid for the diagnosis track")
         asyncio.run(_run_incident_track(args, paths))
     else:
         asyncio.run(_run_diagnosis_track(args, paths))
@@ -309,13 +324,22 @@ def _run(args: argparse.Namespace, paths: BenchmarkPaths) -> None:
 
 # 生成 JSON 与 Markdown 聚合报告
 def _report(args: argparse.Namespace, paths: BenchmarkPaths) -> None:
+    run_root = paths.artifacts / "run-sets" / args.run_set
+    if not (run_root / "run-set.json").is_file():
+        raise SystemExit(
+            f"legacy run-set {args.run_set} is read-only; use its committed formal-v1 report"
+        )
     json_path, markdown_path = write_report(args.run_set, paths)
     print(json.dumps({"json": str(json_path), "markdown": str(markdown_path)}))
 
 
 # 输出数据集配额与真实性门禁结果
 def _audit(args: argparse.Namespace, paths: BenchmarkPaths) -> None:
-    result = audit_dataset(paths, dataset_version=str(args.dataset))
+    result = audit_dataset(
+        paths,
+        dataset_version=str(args.dataset),
+        scope=str(args.scope),
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["ready"]:
         raise SystemExit(1)
@@ -337,7 +361,6 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--track", choices=("diagnosis", "incident"), required=True)
     run.add_argument("--run-set", required=True)
     run.add_argument("--dataset", choices=("formal-v1", "formal-v2"), default="formal-v1")
-    run.add_argument("--model")
     run.add_argument("--case", action="append")
     run.add_argument("--baseline", action="append", choices=_ALL_BASELINES)
     run.add_argument("--repeat", type=int, action="append", choices=(1, 2, 3))
@@ -350,6 +373,7 @@ def _parser() -> argparse.ArgumentParser:
     report.set_defaults(handler=_report)
     audit = subparsers.add_parser("audit")
     audit.add_argument("--dataset", choices=("formal-v1", "formal-v2"), default="formal-v1")
+    audit.add_argument("--scope", choices=("dev", "release"), default="release")
     audit.set_defaults(handler=_audit)
     return parser
 

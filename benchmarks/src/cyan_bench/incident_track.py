@@ -5,9 +5,10 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.base import LLMProvider
 from cyan.config import get_config
 from cyan.training.incidents.context import INCIDENT_PROMPT_VERSION
 from cyan.training.incidents.coordinator import IncidentCoordinator
@@ -170,12 +171,23 @@ def _active_run_reason(jobs: JobStore, view: dict[str, Any]) -> str | None:
 # 提取有界诊断摘要，避免 benchmark artifact 保存完整工具输出
 def _diagnosis_summary(
     diagnosis: object,
-) -> tuple[str | None, str | None, str | None, bool | None, list[dict[str, object]]]:
+) -> tuple[
+    str | None,
+    str | None,
+    Literal["direct", "inferred"] | None,
+    bool | None,
+    list[dict[str, object]],
+]:
     if not isinstance(diagnosis, dict):
         return None, None, None, None, []
     category = diagnosis.get("category")
     root_cause = diagnosis.get("root_cause")
-    support = diagnosis.get("causal_support")
+    raw_support = diagnosis.get("causal_support")
+    support: Literal["direct", "inferred"] | None = (
+        cast(Literal["direct", "inferred"], raw_support)
+        if isinstance(raw_support, str) and raw_support in {"direct", "inferred"}
+        else None
+    )
     patch_recommended = diagnosis.get("patch_recommended")
     refs: list[dict[str, object]] = []
     raw_evidence = diagnosis.get("evidence")
@@ -190,7 +202,7 @@ def _diagnosis_summary(
     return (
         category if isinstance(category, str) else None,
         root_cause if isinstance(root_cause, str) else None,
-        support if isinstance(support, str) and support in {"direct", "inferred"} else None,
+        support,
         patch_recommended if isinstance(patch_recommended, bool) else None,
         refs,
     )
@@ -205,6 +217,7 @@ async def run_incident_track(
     output_dir: Path,
     *,
     is_control: bool,
+    provider: LLMProvider | None = None,
 ) -> IncidentBenchmarkArtifact:
     started = time.monotonic()
     jobs = JobStore(output_dir / "cyan-jobs")
@@ -216,7 +229,13 @@ async def run_incident_track(
         await coordinator.handle_failure(job, attempt, failure)
 
     supervisor = JobSupervisor(jobs, handle_failure)
-    coordinator = IncidentCoordinator(jobs, supervisor, bus, get_config())
+    coordinator = IncidentCoordinator(
+        jobs,
+        supervisor,
+        bus,
+        get_config(),
+        provider=provider,
+    )
     error: str | None = None
     view: dict[str, Any] = {}
     approval_view: dict[str, Any] | None = None
@@ -278,6 +297,17 @@ async def run_incident_track(
         diagnosis_patch_recommended,
         diagnosis_evidence_refs,
     ) = _diagnosis_summary(diagnosis)
+    causal_support_correct = (
+        None
+        if case.expected.causal_support is None or diagnosis_causal_support is None
+        else diagnosis_causal_support == case.expected.causal_support
+    )
+    patch_intent_correct = (
+        None
+        if case.expected.patch_recommended is None
+        or diagnosis_patch_recommended is None
+        else diagnosis_patch_recommended == case.expected.patch_recommended
+    )
     correct_patch_abstention = (
         not case.manifest.patchable
         and diagnosis_patch_recommended is False
@@ -309,13 +339,15 @@ async def run_incident_track(
         final_incident_status=(
             str(final_incident.get("status")) if isinstance(final_incident, dict) else None
         ),
-        spurious_incident=is_control and isinstance(incident, dict),
+        spurious_incident=is_control and isinstance(final_incident, dict),
         diagnosis_present=isinstance(diagnosis, dict),
         diagnosis_category=diagnosis_category,
         diagnosis_root_cause=diagnosis_root_cause,
         diagnosis_causal_support=diagnosis_causal_support,
         diagnosis_patch_recommended=diagnosis_patch_recommended,
         diagnosis_evidence_refs=diagnosis_evidence_refs,
+        causal_support_correct=causal_support_correct,
+        patch_intent_correct=patch_intent_correct,
         proposal_present=isinstance(proposal, dict),
         proposal_valid=proposal_valid,
         unsafe_proposal=not case.manifest.patchable and isinstance(proposal, dict),

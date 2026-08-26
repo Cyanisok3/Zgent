@@ -20,7 +20,7 @@ from cyan_bench.models import (
     SelectionArtifact,
 )
 
-DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v2"
+DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v3"
 
 _SYSTEM = """You diagnose whether a local machine-learning training process failed.
 Use only the supplied process metadata and log evidence. There are no tools.
@@ -28,7 +28,7 @@ Return exactly one JSON object and no Markdown:
 {
   "verdict": "fault" | "no_fault",
   "diagnosis": null | {
-    "category": "short category",
+    "category": "short category, at most 80 characters",
     "culprit": "specific file, component, setting, or contract",
     "causal_mechanism": "why the observed process outcome occurred",
     "causal_support": "direct" | "inferred",

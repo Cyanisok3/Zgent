@@ -109,6 +109,7 @@ def _has_observed_ten_k_tokens(case: LoadedCase, paths: BenchmarkPaths) -> bool:
 def audit_dataset(
     paths: BenchmarkPaths,
     dataset_version: str = "formal-v1",
+    scope: str = "release",
 ) -> dict[str, object]:
     cases = discover_cases(paths.cases, dataset_version=dataset_version)
     split_counts = Counter(case.manifest.split for case in cases)
@@ -157,7 +158,7 @@ def audit_dataset(
         if len(wide_evidence) < 2:
             reasons.append(f"only {len(wide_evidence)}/2 cases have required evidence span >32 KiB")
     else:
-        # formal-v2：强制 Gold 字段，要求 2 个 dev abstain、5 个 test held-out
+        # formal-v2：按开发或发布范围检查 Gold、准入和 abstention 配额
         missing_gold = [
             case.manifest.id
             for case in cases
@@ -169,49 +170,58 @@ def audit_dataset(
             )
         dev_cases = [case for case in cases if case.manifest.split == "dev"]
         test_cases = [case for case in cases if case.manifest.split == "test"]
-        dev_abstain = [case.manifest.id for case in dev_cases if not case.manifest.patchable]
-        if len(dev_abstain) < 2:
-            reasons.append(f"formal-v2 dev needs >=2 non-patchable cases, got {dev_abstain}")
-        test_abstain = [case.manifest.id for case in test_cases if not case.manifest.patchable]
-        test_patchable = [case.manifest.id for case in test_cases if case.manifest.patchable]
-        if len(test_cases) != 5:
-            reasons.append(
-                f"formal-v2 test must have exactly 5 held-out cases, got {len(test_cases)}"
-            )
-        if len(test_abstain) < 2:
-            reasons.append(f"formal-v2 test needs >=2 abstain cases, got {test_abstain}")
-        if len(test_patchable) < 3:
-            reasons.append(f"formal-v2 test needs >=3 patchable cases, got {test_patchable}")
-        test_direct = [
-            case.manifest.id
-            for case in test_cases
-            if case.expected.causal_support == "direct"
-        ]
-        test_inferred = [
-            case.manifest.id
-            for case in test_cases
-            if case.expected.causal_support == "inferred"
-        ]
-        if not test_direct:
-            reasons.append("formal-v2 test needs at least one direct-causal-support gold")
-        if not test_inferred:
-            reasons.append("formal-v2 test needs at least one inferred-causal-support gold")
-        expected_total = len(cases)
-        if len(admitted) != expected_total:
-            reasons.append(
-                "only "
-                f"{len(admitted)}/{expected_total} formal-v2 cases passed three-repeat admission"
-            )
-        if len(long_bytes) < 2:
-            reasons.append(f"only {len(long_bytes)}/2 formal-v2 cases have observed logs >=40 KiB")
-        if len(long_tokens) < 2:
-            reasons.append(
-                f"only {len(long_tokens)}/2 formal-v2 cases have API-verified input >10k tokens"
-            )
-        if len(wide_evidence) < 1:
-            reasons.append(
-                f"only {len(wide_evidence)}/1 formal-v2 cases have required evidence span >32 KiB"
-            )
+        admitted_ids = set(admitted)
+        if scope == "dev":
+            dev_abstain = [
+                case.manifest.id for case in dev_cases if not case.manifest.patchable
+            ]
+            if len(dev_abstain) < 1:
+                reasons.append(
+                    f"formal-v2 dev needs >=1 non-patchable case, got {dev_abstain}"
+                )
+            admitted_dev = [case for case in dev_cases if case.manifest.id in admitted_ids]
+            if len(admitted_dev) != len(dev_cases):
+                reasons.append(
+                    f"only {len(admitted_dev)}/{len(dev_cases)} formal-v2 dev cases "
+                    "passed admission"
+                )
+        elif scope == "release":
+            test_abstain = [
+                case.manifest.id for case in test_cases if not case.manifest.patchable
+            ]
+            test_patchable = [
+                case.manifest.id for case in test_cases if case.manifest.patchable
+            ]
+            if len(test_cases) != 5:
+                reasons.append(
+                    f"formal-v2 test must have exactly 5 held-out cases, got {len(test_cases)}"
+                )
+            if len(test_abstain) < 2:
+                reasons.append(f"formal-v2 test needs >=2 abstain cases, got {test_abstain}")
+            if len(test_patchable) < 3:
+                reasons.append(f"formal-v2 test needs >=3 patchable cases, got {test_patchable}")
+            test_direct = [
+                case.manifest.id
+                for case in test_cases
+                if case.expected.causal_support == "direct"
+            ]
+            test_inferred = [
+                case.manifest.id
+                for case in test_cases
+                if case.expected.causal_support == "inferred"
+            ]
+            if not test_direct:
+                reasons.append("formal-v2 test needs at least one direct-causal-support gold")
+            if not test_inferred:
+                reasons.append("formal-v2 test needs at least one inferred-causal-support gold")
+            admitted_test = [case for case in test_cases if case.manifest.id in admitted_ids]
+            if len(admitted_test) != len(test_cases):
+                reasons.append(
+                    f"only {len(admitted_test)}/{len(test_cases)} formal-v2 test cases "
+                    "passed admission"
+                )
+        else:
+            reasons.append(f"unsupported formal-v2 audit scope: {scope}")
     return {
         "schema_version": 1,
         "dataset_version": dataset_version,

@@ -285,6 +285,8 @@ class IncidentBenchmarkArtifact(BaseModel):
         default_factory=list,
         max_length=32,
     )
+    causal_support_correct: bool | None = None
+    patch_intent_correct: bool | None = None
     proposal_present: bool = False
     proposal_valid: bool = False
     unsafe_proposal: bool = False

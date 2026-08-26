@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "diagnosis": {
+    "category": "data-loader",
+    "culprit": ["TokensLoader", "item_loader", "TextFiles"],
+    "causal_mechanism": ["text file optimize omits token dimensions", "chunk metadata has no dimension"]
+  },
+  "causal_support": "direct",
+  "patch_recommended": true,
+  "required_groups": [
+    [
+      {
+        "source": "stderr",
+        "regex": "(?:TypeError:|ValueError:).*(?:NoneType|chunk|dimension)"
+      }
+    ],
+    [
+      {
+        "source": "stderr",
+        "regex": "(?:text_files|streaming|generate_roi|TokensLoader)"
+      }
+    ]
+  ]
+}

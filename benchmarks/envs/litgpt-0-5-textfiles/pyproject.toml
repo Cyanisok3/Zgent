@@ -1,0 +1,19 @@
+[project]
+name = "cyan-bench-litgpt-0-5-textfiles"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "huggingface-hub>=0.23.5",
+    "jsonargparse[signatures]>=4.37",
+    "lightning>=2.5,<3",
+    "litdata==0.2.58",
+    "numpy<2",
+    "psutil==7",
+    "safetensors>=0.4.3",
+    "tokenizers>=0.15.2",
+    "torch==2.7.1",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false

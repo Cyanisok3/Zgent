@@ -9,7 +9,7 @@ from cyan.training.incidents.selector import EvidenceSelection
 
 MAX_INPUT_BYTES = 128 * 1024
 MAX_INITIAL_EVIDENCE_BYTES = 32 * 1024
-INCIDENT_PROMPT_VERSION = "causal-support-abstention-v1"
+INCIDENT_PROMPT_VERSION = "causal-support-abstention-v5"
 
 
 @dataclass
@@ -49,8 +49,17 @@ def build_incident_context(
         "unobserved file, setting, variable, or dependency version.\n"
         "Set patch_recommended=true only for a user-workspace cause fixable by one exact "
         "replacement in one existing file and verifiable by rerunning the original command. "
+        "A change that only removes the first observed exception is not safe when downstream "
+        "producer-consumer contract assumptions remain unverified; in that case set it false. "
         "For external data, environment or framework limitations, dependency changes, "
         "multi-file fixes, or insufficient evidence, set it false and stop after diagnosis. "
+        "Once the observed traceback and workspace producer establish the relevant contract, "
+        "submit the diagnosis immediately; abstaining does not require exhaustively tracing "
+        "third-party framework internals. Use no more than six read-only tool calls before "
+        "submit_diagnosis, and do not draft a patch before submitting the diagnosis. After a "
+        "successful direct diagnosis with patch_recommended=true, immediately call "
+        "propose_patch using already observed source; otherwise stop. Preserve the input budget "
+        "for submit_diagnosis and, when allowed, propose_patch. "
         "A diagnosis without a patch is valid. Evidence must cite observed references.\n\n"
         f"Failure capsule:\n{capsule.model_dump_json(indent=2)}\n\n"
         f"Selected evidence:\n{selection.content}\n\n"

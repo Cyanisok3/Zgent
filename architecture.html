@@ -89,13 +89,22 @@
     td { color: var(--muted); }
     td:first-child { color: var(--ink); font-weight: 700; white-space: nowrap; }
     .note { margin-top: 18px; padding: 14px 16px; border-left: 4px solid var(--amber); background: var(--amber-soft); color: #68400b; }
+    .branch-grid, .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .branch { padding: 17px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcfe; }
+    .branch.accept { border-color: #a8dfdc; background: var(--teal-soft); }
+    .branch.abstain { border-color: #f0d28b; background: var(--amber-soft); }
+    .branch p { color: var(--muted); }
+    .metric { padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: #f8fafc; }
+    .metric-value { display: block; margin-bottom: 4px; color: var(--blue); font-size: 1.55rem; font-weight: 800; line-height: 1.2; }
+    .metric small { color: var(--muted); }
+    a { color: var(--blue); text-underline-offset: 3px; }
     footer { margin-top: 30px; color: var(--muted); font-size: .9rem; }
 
     @media (max-width: 820px) {
       main { padding-top: 30px; }
       .hero-flow, .event-flow { grid-template-columns: 1fr; }
       .hero-flow .flow-arrow { display: grid; transform: rotate(90deg); min-height: 16px; }
-      .steps, .runtime-grid, .two-col, .boundary { grid-template-columns: 1fr; }
+      .steps, .runtime-grid, .two-col, .boundary, .branch-grid, .metric-grid { grid-template-columns: 1fr; }
       .event-arrow { transform: rotate(90deg); }
       td:first-child { white-space: normal; }
     }
@@ -112,6 +121,7 @@
       <span class="chip">TCP loopback</span>
       <span class="chip">NDJSON + JSON-RPC 2.0</span>
       <span class="chip">human approval</span>
+      <span class="chip">evidence-gated proposal</span>
       <span class="chip">original exit code decides resolution</span>
     </div>
   </header>
@@ -123,8 +133,8 @@
       <div class="flow-node"><strong>1 · User surface</strong><small><code>/monitor</code> 输入命令，<code>/start</code> 确认启动</small></div>
       <div class="flow-node"><strong>2 · JobSupervisor</strong><small>启动真实进程，持续排空 stdout/stderr 并写入 Attempt</small></div>
       <div class="flow-node"><strong>3 · Incident</strong><small>非零退出创建 Failure Capsule 和 Incident run</small></div>
-      <div class="flow-node"><strong>4 · AgentRuntime</strong><small>选择有限证据，运行六工具 Incident Agent</small></div>
-      <div class="flow-node"><strong>5 · Controlled recovery</strong><small>人工批准后应用补丁、可选 Smoke、重跑原命令</small></div>
+      <div class="flow-node"><strong>4 · IncidentRuntime</strong><small>选择有限证据，输出诊断，并在证据充分时提出补丁</small></div>
+      <div class="flow-node"><strong>5 · Outcome</strong><small>合理停止于诊断，或经人工批准进入受控修复</small></div>
     </div>
   </section>
 
@@ -172,12 +182,12 @@
     <div class="runtime-grid">
       <article class="card"><h3>1. 验证证据没有变化</h3><p>Runtime 重新计算 stdout/stderr 的 SHA-256。如果日志在 Failure Capsule 之后发生变化，本轮直接失败，不继续调查。</p></article>
       <article class="card"><h3>2. 选择初始证据</h3><p>Evidence Selector v1 分块扫描不可变日志，按固定规则选择有限范围。它不调用 LLM、不读源码，也不改变工具权限。</p></article>
-      <article class="card"><h3>3. 创建 Incident profile</h3><p>Profile 把 Failure Capsule、已选择证据、当前指令和上一轮有限结果组合成 system prompt，并设置本轮预算。</p></article>
+      <article class="card"><h3>3. 创建 Incident profile</h3><p>Profile 把 Failure Capsule、已选择证据、当前指令和上一轮有限结果组合成 system prompt，并固定当前 <code>causal-support-abstention-v1</code> 诊断契约。</p></article>
       <article class="card"><h3>4. 注册六个工具</h3><p>四个工具只读；两个工具只写 Incident artifact，不写用户 workspace。</p><div class="tool-list" aria-label="incident tools"><code>read_file</code><code>list_dir</code><code>search_text</code><code>read_job_log</code><code>submit_diagnosis</code><code>propose_patch</code></div></article>
     </div>
     <div class="two-col">
-      <div class="card teal"><h3>本轮固定边界</h3><p>最多 12 步；总输入最多 128 KiB；初始日志证据有单独上限。上下文只包含当前 Incident 所需信息，不注入旧会话或全局记忆。</p></div>
-      <div class="card amber"><h3>提案不是应用</h3><p><code>propose_patch</code> 只验证一次精确且唯一的 SEARCH/REPLACE，并生成 <code>proposal.diff</code>。真正的校验、批准、应用和回滚由后续的 PatchService 流程负责。</p></div>
+      <div class="card teal"><h3>本轮固定边界</h3><p>最多 12 步；总输入最多 128 KiB；初始日志证据最多 32 KiB。上下文只包含当前 Incident 所需信息，不注入旧会话或全局记忆。</p></div>
+      <div class="card amber"><h3>提案不是默认动作</h3><p>Diagnosis 必须显式声明 <code>causal_support</code> 和 <code>patch_recommended</code>。只有 <code>direct + true</code> 才能调用 <code>propose_patch</code>；其余情况应在诊断后停止。</p></div>
     </div>
     <pre class="code-path">IncidentRuntime.run()
   -> verify immutable log hashes
@@ -214,7 +224,17 @@
       mark failure
 
   publish StepFinishedEvent</pre>
-    <div class="note"><strong>重要边界：</strong>Agent 可以提交诊断和补丁提案，但不能运行 shell、修改训练 workspace 或自行批准补丁。它的输出必须经过 Incident 状态机和人工决策。</div>
+    <div class="branch-grid" aria-label="diagnosis decision gate">
+      <article class="branch accept">
+        <h3>直接因果证据，且可单文件修复</h3>
+        <p><code>causal_support=direct</code>、<code>patch_recommended=true</code>。Agent 可以继续生成一次精确唯一替换的 proposal，但仍不能应用它。</p>
+      </article>
+      <article class="branch abstain">
+        <h3>推断证据，或不适合当前修复边界</h3>
+        <p><code>inferred</code>、外部数据/环境问题、依赖变更、多文件修复或证据不足时，保留结构化 Diagnosis，不虚构路径，也不生成 proposal。</p>
+      </article>
+    </div>
+    <div class="note"><strong>重要边界：</strong>Agent 不能运行 shell、修改训练 workspace 或自行批准补丁。Diagnosis 可以是有效产物；只有通过证据门控的 Proposal 才能进入人工审批。</div>
   </section>
 
   <section class="panel" aria-labelledby="events">
@@ -226,18 +246,22 @@
       <div class="event-node">Core EventBus<br><small>trace + broadcaster</small></div><div class="event-arrow">→</div>
       <div class="event-node">IpcEventBroadcaster<br><small>TCP client event</small></div>
     </div>
-    <p>客户端先通过 <code>event.subscribe</code> 注册 topics 和 scope。之后会收到 <code>kind: "event"</code> 的 NDJSON 推送，并可以用 <code>job.get</code> 读取权威快照。事件适合驱动界面刷新，Incident 和 Job 文件才是恢复所依赖的持久状态。</p>
+    <p>客户端先通过 <code>event.subscribe</code> 注册 topics 和 scope。需要恢复历史时，订阅会先进入 pending：历史事件在同一 writer 的共享写锁内完成回放，随后 <code>activate</code> 才放行已经排队的实时事件，从而保证 history-before-live。TUI 还会按当前 Job/Run ID 忽略旧目标的迟到事件。</p>
+    <p>正常推送仍是 <code>kind: "event"</code> 的 NDJSON；客户端可用 <code>job.get</code> 读取权威快照。事件负责驱动界面，Incident 和 Job 文件负责恢复。</p>
   </section>
 
   <section class="panel" aria-labelledby="recovery">
     <h2 id="recovery">六、人工批准后的修复闭环</h2>
-    <p class="section-intro">Agent 结束后，Coordinator 读取诊断和提案结果。如果两者都存在，Incident 才会进入等待批准状态；否则本轮调查失败或停留在不可应用状态。</p>
+    <p class="section-intro">Agent 结束后，Coordinator 分别读取 Diagnosis 和 Proposal。Diagnosis 会被持久化；只有同时存在通过门控的 Proposal，Incident 才进入等待批准。没有 Proposal 的诊断当前收敛为 <code>unresolved</code>，用户仍可通过 <code>/incident</code> 发起新一轮调查。</p>
     <div class="state-line" aria-label="incident state flow">
       <span class="state active">diagnosing</span><span class="state-arrow">→</span><span class="state active">awaiting_approval</span><span class="state-arrow">→</span><span class="state active">applying</span><span class="state-arrow">→</span><span class="state">smoke_running</span><span class="state-arrow">→</span><span class="state">smoke_passed / smoke_skipped</span><span class="state-arrow">→</span><span class="state active">retry_running</span><span class="state-arrow">→</span><span class="state done">resolved</span>
     </div>
+    <div class="state-line" aria-label="diagnosis-only state flow">
+      <span class="state active">diagnosing</span><span class="state-arrow">→ diagnosis only →</span><span class="state">unresolved</span><span class="state-arrow">→ FOLLOW_UP →</span><span class="state active">diagnosing</span>
+    </div>
     <div class="steps">
       <article class="step"><span class="step-number">1</span><div><h3>Review</h3><p>客户端通过 <code>incident.review</code> 获取提案对应文件的前后文本。用户看到的是生成的单文件补丁，而不是 Agent 任意写入后的工作区。</p></div></article>
-      <article class="step"><span class="step-number">2</span><div><h3>Apply</h3><p>用户批准后，PatchService 检查 proposal 哈希、目标文件哈希、workspace 根目录和 <code>git apply --check</code>，然后才应用补丁。</p></div></article>
+      <article class="step"><span class="step-number">2</span><div><h3>Apply</h3><p>用户批准后，PatchService 检查 proposal 哈希、目标文件哈希、Git workspace 根目录和 <code>git apply --check</code>，然后才应用补丁。非 Git workspace 可以诊断和审阅 diff，但不能一键应用。</p></div></article>
       <article class="step"><span class="step-number">3</span><div><h3>Optional Smoke</h3><p>如果 workspace 声明了 Smoke verifier，它会在原训练命令前运行。Smoke 失败时可以安全回滚；Smoke 成功或被跳过后才进入重跑。</p></div></article>
       <article class="step"><span class="step-number">4</span><div><h3>Retry</h3><p>重跑使用 JobStore 中保存的原始 argv、cwd 和环境。只有原训练命令最终返回 0，Incident 才能进入 <code>resolved</code>。</p></div></article>
     </div>
@@ -284,7 +308,20 @@
     <p>完整训练输出只保留在 Attempt 日志中。Incident artifacts 保存状态、哈希、证据引用、诊断、提案和验证结果，不重复复制大段日志、补丁正文或模型上下文。</p>
   </section>
 
-  <footer>当前公开入口是 <code>cyan</code> TUI，以及用于启动和停止 daemon 的 <code>cyan core start</code> / <code>cyan core stop</code>。页面描述的是当前代码路径，不把 roadmap 或通用 Agent 能力当作现有功能。</footer>
+  <section class="panel" aria-labelledby="evaluation">
+    <h2 id="evaluation">评测边界：运行时之外如何验证这条链路</h2>
+    <p class="section-intro"><code>benchmarks/</code> 与产品运行环境隔离，使用带上游来源和依赖锁的真实训练故障。它用于测量证据检索、诊断和完整 Incident 闭环，不会向产品 Runtime 注入 benchmark 专用能力。</p>
+    <div class="metric-grid">
+      <article class="metric"><span class="metric-value">15 + 3</span><small>15 个故障案例（6 dev、9 frozen test）和 3 个正常 Control。</small></article>
+      <article class="metric"><span class="metric-value">40.74%</span><small><code>formal-v1</code> frozen-test resolved rate；case bootstrap 95% CI 为 14.81%–66.67%。</small></article>
+      <article class="metric"><span class="metric-value">62.96%</span><small>proposal valid rate；同一报告中的 unsafe proposal rate 为 22.22%。</small></article>
+      <article class="metric"><span class="metric-value">9 / 9</span><small>正常产品路径成功且未误触发 Incident；正式报告记录的基础设施错误为 0。</small></article>
+    </div>
+    <p>无工具诊断基线的匿名评审包已完成 144/144 项双人盲审、分歧复测和第三人裁决。详细数字见 <a href="benchmarks/reports/formal-v1/report.md">formal-v1 report</a> 与 <a href="benchmarks/reports/formal-v1/human-review.md">human review</a>。</p>
+    <div class="note"><strong>版本解释：</strong><code>formal-v1</code> 是冻结历史结果，早于当前 <code>causal-support-abstention-v1</code> prompt。新的 abstention gate 必须写入新的 run-set 重新测量，不能用旧报告证明当前门控已经改善 unsafe proposal。评测范围仍限于单机 CPU/MPS 上稳定的非零退出，不覆盖 CUDA/NCCL、OOM、挂死或静默收敛异常。</div>
+  </section>
+
+  <footer>当前公开入口是 <code>cyan</code> TUI，以及用于启动和停止 daemon 的 <code>cyan core start</code> / <code>cyan core stop</code>。页面描述的是当前代码路径；benchmark 是外部验证层，不是 Runtime 功能，也不把 roadmap 或通用 Agent 能力当作现有能力。</footer>
 </main>
 </body>
 </html>

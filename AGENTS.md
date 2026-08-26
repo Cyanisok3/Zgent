@@ -168,3 +168,14 @@ Every function has one concise Chinese comment immediately above its `def` line.
 has two Chinese comment lines immediately above its `def` line. Do not replace these comments with
 multi-line function docstrings. TypeScript functions and test cases follow the same concise Chinese
 comment rule.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked as local Markdown files under `.scratch/`. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.

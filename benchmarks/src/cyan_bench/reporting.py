@@ -6,7 +6,9 @@ import statistics
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from cyan.training.incidents.context import INCIDENT_PROMPT_VERSION
 
 from cyan_bench.cases import LoadedCase, discover_cases
 from cyan_bench.diagnosis import (
@@ -59,6 +61,11 @@ def _macro(records: list[dict[str, Any]], key: str) -> dict[str, object]:
         "macro_mean": round(statistics.fmean(case_values.values()), 6) if case_values else None,
         "bootstrap_95_ci": _bootstrap_ci(case_values),
     }
+
+
+# 返回没有适用观测时的指标占位
+def _not_available() -> dict[str, object]:
+    return {"cases": 0, "macro_mean": None, "bootstrap_95_ci": None}
 
 
 # 按 baseline 汇总检索或诊断指标
@@ -135,6 +142,8 @@ def _score_diagnosis(case: LoadedCase, artifact: DiagnosisRunArtifact) -> dict[s
             "category_correct": False,
             "culprit_hit": False,
             "causal_mechanism_hit": False,
+            "causal_support_correct": None,
+            "patch_intent_correct": None,
             "correct_abstention": False,
             "false_alarm": False,
             "unnecessary_patch_intent": False,
@@ -144,26 +153,38 @@ def _score_diagnosis(case: LoadedCase, artifact: DiagnosisRunArtifact) -> dict[s
             "category_correct": False,
             "culprit_hit": False,
             "causal_mechanism_hit": False,
+            "causal_support_correct": None,
+            "patch_intent_correct": None,
             "correct_abstention": answer.verdict == "no_fault",
             "false_alarm": answer.verdict == "fault",
             "unnecessary_patch_intent": answer.patch_recommended,
         }
+    actual_support: str | None = None
     if isinstance(answer, DiagnosisAnswerV2):
         if answer.diagnosis is None:
             return {
                 "category_correct": False,
                 "culprit_hit": False,
                 "causal_mechanism_hit": False,
+                "causal_support_correct": None,
+                "patch_intent_correct": (
+                    None
+                    if case.expected.patch_recommended is None
+                    else answer.patch_recommended == case.expected.patch_recommended
+                ),
                 "correct_abstention": False,
                 "false_alarm": False,
                 "unnecessary_patch_intent": False,
             }
+        actual_support = answer.diagnosis.causal_support
         serialized = json.dumps(
             answer.diagnosis.model_dump(mode="json"), ensure_ascii=False
         ).lower()
         category = answer.diagnosis.category.lower()
     else:
         diagnosis = answer.diagnosis or {}
+        raw_support = diagnosis.get("causal_support")
+        actual_support = raw_support if isinstance(raw_support, str) else None
         serialized = json.dumps(diagnosis, ensure_ascii=False).lower()
         category = str(diagnosis.get("category", "")).lower()
     return {
@@ -171,6 +192,16 @@ def _score_diagnosis(case: LoadedCase, artifact: DiagnosisRunArtifact) -> dict[s
         "culprit_hit": any(item.lower() in serialized for item in case.expected.diagnosis.culprit),
         "causal_mechanism_hit": any(
             item.lower() in serialized for item in case.expected.diagnosis.causal_mechanism
+        ),
+        "causal_support_correct": (
+            None
+            if case.expected.causal_support is None or actual_support is None
+            else actual_support == case.expected.causal_support
+        ),
+        "patch_intent_correct": (
+            None
+            if case.expected.patch_recommended is None
+            else answer.patch_recommended == case.expected.patch_recommended
         ),
         "correct_abstention": False,
         "false_alarm": False,
@@ -186,6 +217,17 @@ def _incident_macro(records: list[dict[str, Any]], key: str) -> dict[str, object
         "missed_patch_opportunity": lambda item: bool(item["patchable"]),
         "patchable_resolved": lambda item: bool(item["patchable"]),
     }
+    abstention_metrics = {
+        "unsafe_proposal",
+        "correct_patch_abstention",
+        "missed_patch_opportunity",
+        "patchable_resolved",
+        "abstention_gate_violated",
+    }
+    if key in abstention_metrics:
+        records = [
+            item for item in records if item.get("abstention_metrics_available") is True
+        ]
     predicate = population.get(key)
     if predicate is None:
         return _macro(records, key)
@@ -198,7 +240,22 @@ def _run_set_config(run_root: Path) -> dict[str, object]:
     path = run_root / "run-set.json"
     if not path.is_file():
         return {"dataset_version": "formal-v1", "has_config": False}
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid run-set config: {path}")
+    return {str(key): value for key, value in payload.items()} | {"has_config": True}
+
+
+# 按 run-set 固定的案例集合过滤数据集
+def _scoped_cases(
+    cases: dict[str, LoadedCase],
+    run_config: dict[str, object],
+) -> dict[str, LoadedCase]:
+    selected = run_config.get("selected_case_ids")
+    if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
+        return cases
+    selected_ids = set(selected)
+    return {case_id: case for case_id, case in cases.items() if case_id in selected_ids}
 
 
 # 汇总一个 run-set 的检索、诊断、Control 与阶段指标
@@ -210,13 +267,16 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
         case.manifest.id: case
         for case in discover_cases(paths.cases, dataset_version=dataset_version)
     }
+    cases = _scoped_cases(cases, run_config)
     selection_records: list[dict[str, Any]] = []
     diagnosis_records: list[dict[str, Any]] = []
     for selection_path in sorted(run_root.glob("diagnosis/*/*/*/*/selection.json")):
         selection = SelectionArtifact.model_validate_json(
             selection_path.read_text(encoding="utf-8")
         )
-        case = cases[selection.case_id]
+        case = cases.get(selection.case_id)
+        if case is None:
+            continue
         variant = selection_path.parts[-4]
         capture_dir = (
             paths.artifacts
@@ -288,7 +348,13 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
         "selection_ratio",
         "selector_latency_seconds",
     )
-    diagnosis_metrics = ("category_correct", "culprit_hit", "causal_mechanism_hit")
+    diagnosis_metrics = (
+        "category_correct",
+        "culprit_hit",
+        "causal_mechanism_hit",
+        "causal_support_correct",
+        "patch_intent_correct",
+    )
     selection_by_baseline = _by_baseline(frozen_selections, selection_metrics)
     by_baseline = _by_baseline(frozen, diagnosis_metrics)
     control_summary: dict[str, dict[str, object]] = {}
@@ -312,7 +378,9 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
         artifact = IncidentBenchmarkArtifact.model_validate_json(
             incident_path.read_text(encoding="utf-8")
         )
-        case = cases[artifact.case_id]
+        case = cases.get(artifact.case_id)
+        if case is None:
+            continue
         variant = "control" if artifact.is_control else "buggy"
         capture_path = (
             paths.artifacts
@@ -340,6 +408,8 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
                 "log_length_bucket": _log_length_bucket(log_bytes),
                 "patchable": case.manifest.patchable,
                 "patchable_resolved": bool(artifact.resolved) if case.manifest.patchable else False,
+                "abstention_metrics_available": bool(run_config.get("has_config"))
+                and artifact.prompt_version == INCIDENT_PROMPT_VERSION,
             }
         )
     incident_prompt_versions = sorted(
@@ -353,7 +423,7 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
     ]
     incident_controls = [item for item in valid_incidents if item["is_control"]]
     fault_incidents = [item for item in incident_records if not item["is_control"]]
-    dataset_cases = discover_cases(paths.cases, dataset_version=dataset_version)
+    dataset_cases = list(cases.values())
     expected_fault_incidents = len(dataset_cases) * 3
     expected_test_incidents = len(
         [case for case in dataset_cases if case.manifest.split == "test"]
@@ -366,7 +436,79 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
         "missed_patch_opportunity",
         "patchable_resolved",
         "abstention_gate_violated",
+        "causal_support_correct",
+        "patch_intent_correct",
     )
+    diagnosis_protocol_config = {
+        "temperature": run_config.get("temperature", DIAGNOSIS_TEMPERATURE),
+        "reasoning_effort": run_config.get("reasoning_effort", DIAGNOSIS_REASONING_EFFORT),
+        "max_output_tokens": run_config.get(
+            "max_output_tokens", DIAGNOSIS_MAX_OUTPUT_TOKENS
+        ),
+    }
+    if not bool(run_config.get("has_config")):
+        incident_summary = {
+            "resolved_rate": _macro(incident_test, "resolved"),
+            "proposal_valid_rate": _macro(incident_test, "proposal_valid"),
+            "unsafe_proposal_rate": _macro(incident_test, "unsafe_proposal"),
+            "correct_patch_abstention_rate": _not_available(),
+            "missed_patch_opportunity_rate": _not_available(),
+            "patchable_resolved_rate": _not_available(),
+            "abstention_gate_violated_rate": _not_available(),
+            "causal_support_correct_rate": _not_available(),
+            "patch_intent_correct_rate": _not_available(),
+        }
+    else:
+        incident_summary = {
+            "resolved_rate": _incident_macro(incident_test, "resolved"),
+            "proposal_valid_rate": _incident_macro(incident_test, "proposal_valid"),
+            "unsafe_proposal_rate": _incident_macro(incident_test, "unsafe_proposal"),
+            "correct_patch_abstention_rate": _incident_macro(
+                incident_test, "correct_patch_abstention"
+            ),
+            "missed_patch_opportunity_rate": _incident_macro(
+                incident_test, "missed_patch_opportunity"
+            ),
+            "patchable_resolved_rate": _incident_macro(
+                incident_test, "patchable_resolved"
+            ),
+            "abstention_gate_violated_rate": _incident_macro(
+                incident_test, "abstention_gate_violated"
+            ),
+            "causal_support_correct_rate": _incident_macro(
+                incident_test, "causal_support_correct"
+            ),
+            "patch_intent_correct_rate": _incident_macro(
+                incident_test, "patch_intent_correct"
+            ),
+        }
+    requested_model = run_config.get("requested_model")
+    models_requested = (
+        [str(requested_model)]
+        if isinstance(requested_model, str)
+        else sorted(
+            {
+                str(item.model_requested)
+                for item in (
+                    DiagnosisRunArtifact.model_validate_json(path.read_text())
+                    for path in run_root.glob("diagnosis/*/*/*/*/diagnosis.json")
+                )
+            }
+        )
+    )
+    diagnosis_prompt_version = run_config.get("diagnosis_prompt_version")
+    if not isinstance(diagnosis_prompt_version, str):
+        prompt_versions = {str(item["prompt_version"]) for item in diagnosis_records}
+        diagnosis_prompt_version = (
+            next(iter(prompt_versions)) if len(prompt_versions) == 1 else "mixed"
+        )
+    incident_prompt_version = run_config.get("incident_prompt_version")
+    if not isinstance(incident_prompt_version, str):
+        incident_prompt_version = (
+            incident_prompt_versions[0]
+            if len(incident_prompt_versions) == 1
+            else "mixed"
+        )
     return {
         "schema_version": 2,
         "run_set": run_set,
@@ -375,15 +517,7 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
         "generated_at": _now(),
         "main_score_scope": "frozen test cases only; no weighted composite",
         "diagnosis_protocol": {
-            "models_requested": sorted(
-                {
-                    str(item.model_requested)
-                    for item in (
-                        DiagnosisRunArtifact.model_validate_json(path.read_text())
-                        for path in run_root.glob("diagnosis/*/*/*/*/diagnosis.json")
-                    )
-                }
-            ),
+            "models_requested": models_requested,
             "models_resolved": sorted(
                 {
                     str(item.model_resolved)
@@ -394,21 +528,11 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
                     if item.model_resolved is not None
                 }
             ),
-            "temperature": DIAGNOSIS_TEMPERATURE,
-            "reasoning_effort": DIAGNOSIS_REASONING_EFFORT,
-            "max_output_tokens": DIAGNOSIS_MAX_OUTPUT_TOKENS,
-            "prompt_version": (
-                sorted({str(item["prompt_version"]) for item in diagnosis_records})[0]
-                if len({str(item["prompt_version"]) for item in diagnosis_records}) == 1
-                else "mixed"
-            ),
+            **diagnosis_protocol_config,
+            "prompt_version": diagnosis_prompt_version,
         },
         "incident_protocol": {
-            "prompt_version": (
-                incident_prompt_versions[0]
-                if len(incident_prompt_versions) == 1
-                else "mixed"
-            ),
+            "prompt_version": incident_prompt_version,
         },
         "selection_records": selection_records,
         "selection_test_macro_by_baseline": selection_by_baseline,
@@ -448,23 +572,7 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
             "test_expected": expected_test_incidents,
             "test_valid": len(incident_test),
         },
-        "incident_test": {
-            "resolved_rate": _incident_macro(incident_test, "resolved"),
-            "proposal_valid_rate": _incident_macro(incident_test, "proposal_valid"),
-            "unsafe_proposal_rate": _incident_macro(incident_test, "unsafe_proposal"),
-            "correct_patch_abstention_rate": _incident_macro(
-                incident_test, "correct_patch_abstention"
-            ),
-            "missed_patch_opportunity_rate": _incident_macro(
-                incident_test, "missed_patch_opportunity"
-            ),
-            "patchable_resolved_rate": _incident_macro(
-                incident_test, "patchable_resolved"
-            ),
-            "abstention_gate_violated_rate": _incident_macro(
-                incident_test, "abstention_gate_violated"
-            ),
-        },
+        "incident_test": incident_summary,
         "incident_test_by_failure_stage": _by_failure_stage(
             incident_test,
             incident_metrics,
@@ -521,14 +629,16 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "report.json"
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    diagnosis_protocol = cast(dict[str, Any], report["diagnosis_protocol"])
+    incident_protocol = cast(dict[str, Any], report["incident_protocol"])
     lines = [
         f"# Cyan Incident Benchmark — {run_set}",
         "",
         "主表仅包含冻结 test；没有加权总分。",
         "",
         f"Dataset: `{report['dataset_version']}`; Diagnosis prompt: "
-        f"`{report['diagnosis_protocol']['prompt_version']}`; Incident prompt: "
-        f"`{report['incident_protocol']['prompt_version']}`。",
+        f"`{diagnosis_protocol['prompt_version']}`; Incident prompt: "
+        f"`{incident_protocol['prompt_version']}`。",
         "",
         "## Retrieval macro (frozen test)",
         "",
@@ -550,8 +660,8 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             "",
             "## Diagnosis macro (frozen test)",
             "",
-            "| Baseline | Category | Culprit | Mechanism |",
-            "|---|---:|---:|---:|",
+            "| Baseline | Category | Culprit | Mechanism | Causal support | Patch intent |",
+            "|---|---:|---:|---:|---:|---:|",
         ]
     )
     macro = report["test_macro_by_baseline"]
@@ -561,7 +671,9 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
         lines.append(
             f"| {baseline} | {values['category_correct']['macro_mean']} | "
             f"{values['culprit_hit']['macro_mean']} | "
-            f"{values['causal_mechanism_hit']['macro_mean']} |"
+            f"{values['causal_mechanism_hit']['macro_mean']} | "
+            f"{values['causal_support_correct']['macro_mean']} | "
+            f"{values['patch_intent_correct']['macro_mean']} |"
         )
     incident = report["incident_test"]
     assert isinstance(incident, dict)
@@ -582,6 +694,8 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
         "missed_patch_opportunity_rate",
         "patchable_resolved_rate",
         "abstention_gate_violated_rate",
+        "causal_support_correct_rate",
+        "patch_intent_correct_rate",
     ):
         values = incident[metric]
         assert isinstance(values, dict)
@@ -591,9 +705,9 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
     lines.extend(
         [
             "",
-            "| 分母说明 | unsafe/correct_abstention 仅统计不可修复案例；",
-            "missed/patchable_resolved 仅统计可修复案例；gate_violated 统计全部有效 Incident；",
-            "resolved/proposal_valid 为整体率。 |",
+            "分母说明：unsafe/correct_abstention 仅统计不可修复案例；"
+            " missed/patchable_resolved 仅统计可修复案例；"
+            " gate_violated 统计全部有效 Incident；resolved/proposal_valid 为整体率。",
         ]
     )
     lines.extend(
@@ -609,16 +723,35 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
     incident_stages = report["incident_test_by_failure_stage"]
     assert isinstance(incident_stages, dict)
     for stage in ("startup", "mid_run", "finalization"):
-        baseline = incident_stages[stage]["cyan_incident"]
+        stage_values = incident_stages.get(stage)
+        baseline = (
+            stage_values.get("cyan_incident", {})
+            if isinstance(stage_values, dict)
+            else {}
+        )
+        resolved_values = baseline.get("resolved", _not_available())
+        proposal_values = baseline.get("proposal_valid", _not_available())
+        unsafe_values = baseline.get("unsafe_proposal", _not_available())
+        abstention_values = baseline.get("correct_patch_abstention", _not_available())
+        missed_values = baseline.get("missed_patch_opportunity", _not_available())
+        patchable_values = baseline.get("patchable_resolved", _not_available())
+        gate_values = baseline.get("abstention_gate_violated", _not_available())
+        assert isinstance(resolved_values, dict)
+        assert isinstance(proposal_values, dict)
+        assert isinstance(unsafe_values, dict)
+        assert isinstance(abstention_values, dict)
+        assert isinstance(missed_values, dict)
+        assert isinstance(patchable_values, dict)
+        assert isinstance(gate_values, dict)
         lines.append(
-            f"| {stage} | {baseline['resolved']['cases']} | "
-            f"{baseline['resolved']['macro_mean']} | "
-            f"{baseline['proposal_valid']['macro_mean']} | "
-            f"{baseline['unsafe_proposal']['macro_mean']} | "
-            f"{baseline['correct_patch_abstention']['macro_mean']} | "
-            f"{baseline['missed_patch_opportunity']['macro_mean']} | "
-            f"{baseline['patchable_resolved']['macro_mean']} | "
-            f"{baseline['abstention_gate_violated']['macro_mean']} |"
+            f"| {stage} | {resolved_values['cases']} | "
+            f"{resolved_values['macro_mean']} | "
+            f"{proposal_values['macro_mean']} | "
+            f"{unsafe_values['macro_mean']} | "
+            f"{abstention_values['macro_mean']} | "
+            f"{missed_values['macro_mean']} | "
+            f"{patchable_values['macro_mean']} | "
+            f"{gate_values['macro_mean']} |"
         )
     lines.extend(
         [
@@ -667,15 +800,18 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             "",
             "## Frozen test cases",
             "",
-            "| Case | Patchable | Stage | Resolved | Proposal valid | Unsafe proposal |",
-            "|---|---|---|---:|---:|---:|",
+            "| Case | Patchable | Stage | Framework | Resolved | Proposal valid | "
+            "Unsafe proposal |",
+            "|---|---|---|---|---:|---:|---:|",
         ]
     )
     dataset_version = str(report["dataset_version"])
-    cases = {
+    test_cases = {
         case.manifest.id: case
         for case in discover_cases(paths.cases, "test", dataset_version=dataset_version)
     }
+    run_config = _run_set_config(paths.artifacts / "run-sets" / run_set)
+    cases = _scoped_cases(test_cases, run_config)
     incident_records = report["incident_records"]
     assert isinstance(incident_records, list)
     for case_id, case in sorted(cases.items()):
@@ -686,13 +822,27 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             and item["error"] is None
             and not item["is_control"]
         ]
-        resolved = statistics.fmean(bool(item["resolved"]) for item in records)
-        proposal = statistics.fmean(bool(item["proposal_valid"]) for item in records)
-        unsafe = statistics.fmean(bool(item["unsafe_proposal"]) for item in records)
+        resolved = (
+            statistics.fmean(bool(item["resolved"]) for item in records)
+            if records
+            else None
+        )
+        proposal = (
+            statistics.fmean(bool(item["proposal_valid"]) for item in records)
+            if records
+            else None
+        )
+        unsafe = (
+            statistics.fmean(bool(item["unsafe_proposal"]) for item in records)
+            if records
+            else None
+        )
         lines.append(
             f"| {case_id} | {'yes' if case.manifest.patchable else 'no'} | "
             f"{case.manifest.failure_stage} | {case.manifest.framework} | "
-            f"{resolved:.6f} | {proposal:.6f} | {unsafe:.6f} |"
+            f"{resolved if resolved is not None else 'N/A'} | "
+            f"{proposal if proposal is not None else 'N/A'} | "
+            f"{unsafe if unsafe is not None else 'N/A'} |"
         )
     product_controls = report["product_controls"]
     assert isinstance(product_controls, dict)

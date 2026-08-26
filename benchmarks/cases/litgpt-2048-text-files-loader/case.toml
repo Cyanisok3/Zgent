@@ -1,0 +1,27 @@
+schema_version = 1
+id = "litgpt-2048-text-files-loader"
+title = "LitGPT TextFiles preprocessing omits the LitData token loader"
+dataset_version = "formal-v2"
+split = "test"
+framework = "litgpt-litdata"
+training_domain = "llm"
+fault_family = "token-stream-metadata"
+mechanism_id = "litdata-textfiles-token-loader-missing"
+failure_stage = "startup"
+origin_kind = "provenance_preserving_port"
+patchable = true
+repo_url = "https://github.com/Lightning-AI/litgpt"
+repo_sha = "5be3d368f387ad4463c66ed5a4fa53449e221403"
+issue_url = "https://github.com/Lightning-AI/litgpt/pull/2048"
+fix_url = "https://github.com/Lightning-AI/litgpt/commit/5be3d368f387ad4463c66ed5a4fa53449e221403"
+license = "Apache-2.0"
+env_id = "litgpt-0-5-textfiles"
+argv = ["python", "cyan_bench_train.py"]
+cwd = "."
+timeout_s = 300
+hardware = "cpu"
+
+[environment]
+OMP_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+PYTHONUNBUFFERED = "1"

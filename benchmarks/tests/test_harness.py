@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+
+from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.types import LlmResponse, ToolCallBlock, UsageStats
 
 from cyan_bench.admission import admit_case
 from cyan_bench.audit import audit_dataset
@@ -28,7 +32,7 @@ from cyan_bench.models import (
     ProcessCapture,
 )
 from cyan_bench.paths import BenchmarkPaths, benchmark_paths
-from cyan_bench.reporting import _incident_macro, build_report
+from cyan_bench.reporting import _incident_macro, build_report, write_report
 from cyan_bench.scoring import score_selection
 
 
@@ -37,6 +41,118 @@ class _AwaitingApprovalCoordinator:
     async def job_view(self, job_id: str) -> dict[str, object]:
         del job_id
         return {"incident": {"status": "awaiting_approval"}}
+
+
+class _ApprovalProvider:
+    # 按固定顺序读取源码、提交 direct diagnosis 并提出唯一替换
+    def __init__(self) -> None:
+        self.calls = 0
+
+    # 从当前 Incident prompt 中取出已观察的证据引用
+    def _references(self, system: str | None) -> tuple[str, str]:
+        text = system or ""
+        workspace = re.search(
+            r"train\.py@sha256:[0-9a-f]{64}#L[0-9]+-L[0-9]+", text
+        )
+        job = re.search(r'"job_id":\s*"([^"]+)"', text)
+        attempt = re.search(r'"attempt_id":\s*"([^"]+)"', text)
+        stderr_range = re.search(
+            r'"stderr":\s*\{.*?"included_start":\s*(\d+),.*?'
+            r'"included_end":\s*(\d+)',
+            text,
+            re.DOTALL,
+        )
+        if workspace is None or job is None or attempt is None or stderr_range is None:
+            raise AssertionError("Incident prompt did not expose expected evidence refs")
+        stderr = (
+            f"stderr:{job.group(1)}/{attempt.group(1)}@bytes:"
+            f"{stderr_range.group(1)}-{stderr_range.group(2)}"
+        )
+        return workspace.group(0), stderr
+
+    # 返回一次假 Provider 响应，避免测试调用外部模型
+    async def chat(
+        self,
+        messages: list[dict[str, object]],
+        tool_schemas: list[dict[str, object]],
+        bus: EventBus,
+        run_id: str,
+        *,
+        step: int = 0,
+        system: str | None = None,
+    ) -> LlmResponse:
+        del tool_schemas, bus, run_id, step
+        self.calls += 1
+        if self.calls == 1:
+            return LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    ToolCallBlock(
+                        id="read-1",
+                        name="read_file",
+                        input={"path": "train.py", "start_line": 1, "line_count": 3},
+                    )
+                ],
+                usage=UsageStats(1, 1),
+            )
+        workspace_ref, stderr_ref = self._references(
+            f"{system or ''}\n{json.dumps(messages, ensure_ascii=False)}"
+        )
+        if self.calls == 2:
+            return LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    ToolCallBlock(
+                        id="diagnosis-1",
+                        name="submit_diagnosis",
+                        input={
+                            "category": "data",
+                            "summary": "The list access exceeds the available items.",
+                            "root_cause": "The workspace training code indexes items[2] although only one item exists.",
+                            "evidence": [
+                                {
+                                    "source": "workspace",
+                                    "reference": workspace_ref,
+                                    "description": "Observed training source range.",
+                                },
+                                {
+                                    "source": "stderr",
+                                    "reference": stderr_ref,
+                                    "description": "Observed failure traceback.",
+                                },
+                            ],
+                            "confidence": 1.0,
+                            "causal_support": "direct",
+                            "patch_recommended": True,
+                        },
+                    )
+                ],
+                usage=UsageStats(1, 1),
+            )
+        if self.calls == 3:
+            return LlmResponse(
+                stop_reason="tool_use",
+                tool_calls=[
+                    ToolCallBlock(
+                        id="proposal-1",
+                        name="propose_patch",
+                        input={
+                            "path": "train.py",
+                            "search": "print(items[2])",
+                            "replace": "print(items[0])",
+                            "evidence": [
+                                {
+                                    "source": "workspace",
+                                    "reference": workspace_ref,
+                                    "description": "Observed exact source block.",
+                                }
+                            ],
+                        },
+                    )
+                ],
+                usage=UsageStats(1, 1),
+            )
+        return LlmResponse(stop_reason="end_turn", text="done", usage=UsageStats(1, 1))
 
 
 # 创建测试使用的最小 Python 训练仓库与双向补丁
@@ -187,7 +303,7 @@ def test_incident_diagnosis_summary_is_bounded() -> None:
 
     assert summary[:4] == ("dtype", "direct cause", "direct", True)
     assert summary[4] == [{"source": "stderr", "reference": "bytes:1-2"}]
-    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v2"
+    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v3"
 
 
 # 功能：验证 Tail、BM25 与 Cyan Selector 均产生可回溯且有界的 evidence
@@ -256,6 +372,34 @@ async def test_control_product_path_has_no_spurious_incident(tmp_path: Path) -> 
     assert artifact.input_tokens == 0
 
 
+# 功能：验证真实 Incident track 在 resolved 后保留审批前 Proposal 合法性
+# 设计：使用本地假 Provider 走 read、diagnosis、proposal、审批和原命令重跑闭环
+async def test_incident_track_preserves_preapproval_proposal_after_resolved(
+    tmp_path: Path,
+) -> None:
+    case_dir, paths = _fixture_case(tmp_path)
+    case = load_case(case_dir)
+    workspace = prepare_workspace(case, paths, "buggy")
+    try:
+        artifact = await run_incident_track(
+            case,
+            paths,
+            workspace,
+            1,
+            paths.artifacts / "incident-approved",
+            is_control=False,
+            provider=_ApprovalProvider(),
+        )
+    finally:
+        discard_workspace(workspace, paths)
+
+    assert artifact.final_incident_status == "resolved"
+    assert artifact.proposal_present is True
+    assert artifact.proposal_valid is True
+    assert artifact.resolved is True
+    assert artifact.abstention_gate_violated is False
+
+
 # 功能：验证 annotated tag 对象 SHA 能解析到工作树 commit
 # 设计：把真实临时仓库改用 tag object 作为 manifest SHA，再构造 control 工作区
 def test_workspace_accepts_annotated_tag_object_sha(tmp_path: Path) -> None:
@@ -306,7 +450,7 @@ def test_workspace_accepts_annotated_tag_object_sha(tmp_path: Path) -> None:
 # 功能：验证提交的 15 个 manifest 静态满足 split、阶段与真实性配额
 # 设计：只读取版本化案例定义，不依赖本机缓存、训练日志或付费模型 artifact
 def test_versioned_dataset_meets_static_quotas() -> None:
-    cases = discover_cases(benchmark_paths().cases)
+    cases = discover_cases(benchmark_paths().cases, dataset_version="formal-v1")
 
     assert len(cases) == 15
     assert Counter(case.manifest.split for case in cases) == Counter({"dev": 6, "test": 9})
@@ -543,6 +687,12 @@ def test_cli_supports_bounded_resumable_runs() -> None:
     assert args.baseline == ["full_native"]
     assert args.repeat == [1]
     assert args.resume is True
+    assert not hasattr(args, "model")
+
+    audit_args = _parser().parse_args(
+        ["audit", "--dataset", "formal-v2", "--scope", "dev"]
+    )
+    assert audit_args.scope == "dev"
 
 
 # 把 fixture 复制为指定数据集版本与 ID 的 v2 案例（fixture 不存在时才创建）
@@ -638,16 +788,40 @@ def test_run_set_config_mismatch_rejects_resume(tmp_path: Path) -> None:
     paths = _paths_of(tmp_path)
     run_root = paths.artifacts / "run-sets" / "dev-v2"
 
-    _freeze_run_set(run_root, "formal-v2", "deepseek-v4-flash")
-    _freeze_run_set(run_root, "formal-v2", "deepseek-v4-flash")
+    _freeze_run_set(
+        run_root,
+        "formal-v2",
+        "dev",
+        ("fixture-fault",),
+        "deepseek-v4-flash",
+    )
+    _freeze_run_set(
+        run_root,
+        "formal-v2",
+        "dev",
+        ("fixture-fault",),
+        "deepseek-v4-flash",
+    )
 
     try:
-        _freeze_run_set(run_root, "formal-v2", "another-model")
+        _freeze_run_set(
+            run_root,
+            "formal-v2",
+            "dev",
+            ("fixture-fault",),
+            "another-model",
+        )
         raise AssertionError("model mismatch was not rejected")
     except SystemExit:
         pass
     try:
-        _freeze_run_set(run_root, "formal-v1", "deepseek-v4-flash")
+        _freeze_run_set(
+            run_root,
+            "formal-v1",
+            "dev",
+            ("fixture-fault",),
+            "deepseek-v4-flash",
+        )
         raise AssertionError("dataset mismatch was not rejected")
     except SystemExit:
         pass
@@ -660,10 +834,66 @@ def test_run_set_config_mismatch_rejects_resume(tmp_path: Path) -> None:
     # 旧 run-set 无 run-set.json 时只允许作为历史结果读取，任何运行写入都被拒绝
     for dataset in ("formal-v1", "formal-v2"):
         try:
-            _freeze_run_set(legacy, dataset, "deepseek-v4-flash")
+            _freeze_run_set(
+                legacy,
+                dataset,
+                "dev",
+                ("fixture-fault",),
+                "deepseek-v4-flash",
+            )
             raise AssertionError(f"legacy run-set accepted a {dataset} write")
         except SystemExit:
             pass
+
+
+# 功能：验证 run-set 元数据保存实际模型、案例范围和正常 ISO 时间
+# 设计：冻结同一配置两次并重新解析 JSON，确认没有额外字符串编码
+def test_run_set_metadata_is_frozen(tmp_path: Path) -> None:
+    _fixture_case(tmp_path)
+    paths = _paths_of(tmp_path)
+    run_root = paths.artifacts / "run-sets" / "metadata"
+
+    _freeze_run_set(
+        run_root,
+        "formal-v1",
+        "test",
+        ("fixture-fault",),
+        "model-from-config",
+    )
+    payload = json.loads((run_root / "run-set.json").read_text(encoding="utf-8"))
+
+    assert payload["dataset_version"] == "formal-v1"
+    assert payload["split"] == "test"
+    assert payload["selected_case_ids"] == ["fixture-fault"]
+    assert payload["requested_model"] == "model-from-config"
+    assert payload["created_at"].endswith("+00:00")
+    datetime.fromisoformat(payload["created_at"])
+
+
+# 功能：验证缺少 Incident 运行结果时 Markdown 报告仍能输出 N/A
+# 设计：使用已冻结但没有 artifact 的临时 run-set，覆盖空阶段与不完整案例
+def test_incomplete_report_renders_empty_stages(tmp_path: Path) -> None:
+    case_dir, _ = _fixture_case(tmp_path)
+    manifest = case_dir / "case.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('split = "dev"', 'split = "test"'),
+        encoding="utf-8",
+    )
+    paths = _paths_of(tmp_path)
+    _freeze_run_set(
+        paths.artifacts / "run-sets" / "partial",
+        "formal-v1",
+        "test",
+        ("fixture-fault",),
+        "model-from-config",
+    )
+
+    _json_path, markdown_path = write_report("partial", paths)
+    markdown = markdown_path.read_text(encoding="utf-8")
+
+    assert "| startup | 0 | None | None |" in markdown
+    assert "| Case | Patchable | Stage | Framework |" in markdown
+    assert "| fixture-fault | yes | mid_run | fixture | N/A | N/A | N/A |" in markdown
 
 
 # 功能：验证 Track A 严格模型对缺失 causal_support/evidence/patch_recommended 直接失败
@@ -768,6 +998,7 @@ def test_abstention_metrics_use_correct_denominators() -> None:
             "missed_patch_opportunity": False,
             "patchable_resolved": True,
             "abstention_gate_violated": False,
+            "abstention_metrics_available": True,
         },
         {
             "case_id": "patch-b",
@@ -779,6 +1010,7 @@ def test_abstention_metrics_use_correct_denominators() -> None:
             "missed_patch_opportunity": True,
             "patchable_resolved": False,
             "abstention_gate_violated": False,
+            "abstention_metrics_available": True,
         },
         {
             "case_id": "nopatch-a",
@@ -789,6 +1021,7 @@ def test_abstention_metrics_use_correct_denominators() -> None:
             "correct_patch_abstention": False,
             "missed_patch_opportunity": True,
             "abstention_gate_violated": True,
+            "abstention_metrics_available": True,
         },
         {
             "case_id": "nopatch-b",
@@ -799,6 +1032,7 @@ def test_abstention_metrics_use_correct_denominators() -> None:
             "correct_patch_abstention": True,
             "missed_patch_opportunity": True,
             "abstention_gate_violated": False,
+            "abstention_metrics_available": True,
         },
     ]
 
@@ -862,6 +1096,8 @@ def test_legacy_run_set_report_still_readable(tmp_path: Path) -> None:
         _freeze_run_set(
             paths.artifacts / "run-sets" / "legacy-v1",
             "formal-v2",
+            "dev",
+            ("fixture-fault",),
             "deepseek-v4-flash",
         )
         raise AssertionError("legacy run-set accepted a v2 write")
