@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from cyan.training.incidents.models import Incident
 from cyan.training.incidents.patch import PatchService, sha256_bytes
@@ -67,6 +68,8 @@ async def _propose(
                 "root_cause": "the observed source causes the crash",
                 "evidence": [_workspace_evidence(path, target)],
                 "confidence": 1.0,
+                "causal_support": "direct",
+                "patch_recommended": True,
             }
         )
     return await tool.invoke(
@@ -99,6 +102,8 @@ async def test_submit_diagnosis_writes_typed_artifact(tmp_path: Path) -> None:
                 }
             ],
             "confidence": 0.9,
+            "causal_support": "inferred",
+            "patch_recommended": False,
         }
     )
 
@@ -107,6 +112,33 @@ async def test_submit_diagnosis_writes_typed_artifact(tmp_path: Path) -> None:
     assert diagnosis.id == payload["id"]
     assert diagnosis.category == "shape"
     assert diagnosis.evidence[0].reference == "bytes 120:180"
+
+
+# 功能：验证诊断工具 schema 要求显式提交因果支撑和补丁意图
+# 设计：缺少任一新字段时在工具边界拒绝，避免默认值掩盖 Agent 输出缺失
+async def test_submit_diagnosis_requires_causal_support_and_patch_intent(
+    tmp_path: Path,
+) -> None:
+    store = IncidentStore(tmp_path / "incidents")
+    _seed_incident(store, tmp_path)
+    tool = SubmitDiagnosisTool(store, "incident-1")
+
+    with pytest.raises(ValidationError):
+        await tool.invoke(
+            {
+                "category": "runtime",
+                "summary": "observed crash",
+                "root_cause": "unknown",
+                "evidence": [
+                    {
+                        "source": "stderr",
+                        "reference": "bytes 1:2",
+                        "description": "crash",
+                    }
+                ],
+                "confidence": 0.5,
+            }
+        )
 
 
 # 功能：验证诊断工具拒绝 harness 未登记为已观察的证据引用
@@ -143,6 +175,8 @@ async def test_submit_diagnosis_rejects_unobserved_evidence(tmp_path: Path) -> N
                 }
             ],
             "confidence": 0.9,
+            "causal_support": "inferred",
+            "patch_recommended": False,
         }
     )
 
@@ -182,6 +216,53 @@ async def test_propose_patch_generates_diff_without_workspace_write(
     assert proposal.patch_sha256 == sha256_bytes(patch.encode("utf-8"))
     assert proposal.diagnosis_id == store.read_diagnosis("incident-1").id
     assert "-old\n+new\n" in patch
+
+
+@pytest.mark.parametrize(
+    ("causal_support", "patch_recommended"),
+    [("inferred", True), ("direct", False)],
+)
+# 功能：验证 Proposal 必须同时满足 direct 因果支撑和补丁推荐
+# 设计：拒绝发生在工作区读取与 artifact 写入之前，覆盖两种 abstention 组合
+async def test_propose_patch_honors_diagnosis_abstention(
+    tmp_path: Path,
+    causal_support: str,
+    patch_recommended: bool,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    target = workspace / "train.py"
+    target.write_text("old\n", encoding="utf-8")
+    store = IncidentStore(tmp_path / "incidents")
+    _seed_incident(store, workspace)
+    evidence = [_workspace_evidence("train.py", target)]
+    diagnosis = await SubmitDiagnosisTool(store, "incident-1").invoke(
+        {
+            "category": "runtime",
+            "summary": "observed crash",
+            "root_cause": "the observed source causes the crash",
+            "evidence": evidence,
+            "confidence": 1.0,
+            "causal_support": causal_support,
+            "patch_recommended": patch_recommended,
+        }
+    )
+    assert not diagnosis.is_error
+
+    result = await ProposePatchTool(store, "incident-1", workspace).invoke(
+        {
+            "path": "train.py",
+            "search": "old",
+            "replace": "new",
+            "evidence": evidence,
+        }
+    )
+
+    assert result.is_error
+    assert "direct causal support" in result.content
+    assert target.read_text(encoding="utf-8") == "old\n"
+    assert not (store.incident_dir("incident-1") / "proposal.json").exists()
+    assert not (store.incident_dir("incident-1") / "proposal.diff").exists()
 
 
 # 功能：验证 propose_patch 由 harness 绑定当前 diagnosis 且不接受模型提供 ID

@@ -4,6 +4,7 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,6 +54,8 @@ class SubmitDiagnosisParams(BaseModel):
     root_cause: str = Field(min_length=1, max_length=8000)
     evidence: list[EvidenceRef] = Field(min_length=1, max_length=32)
     confidence: float = Field(ge=0.0, le=1.0)
+    causal_support: Literal["direct", "inferred"]
+    patch_recommended: bool
 
 
 # 将业务校验错误统一转换为不可重试的工具结果
@@ -182,6 +185,17 @@ class ProposePatchTool(BaseTool):
     # 校验精确替换并只向 incident artifact 目录写生成后的 proposal
     async def invoke(self, params: dict[str, object]) -> ToolResult:
         parsed_params = ProposePatchParams.model_validate(params)
+        try:
+            diagnosis = self._store.read_diagnosis(self._incident_id)
+        except FileNotFoundError:
+            return _validation_error(
+                "submit_diagnosis must succeed before propose_patch"
+            )
+        if not diagnosis.patch_recommended or diagnosis.causal_support != "direct":
+            return _validation_error(
+                "proposal is not allowed: diagnosis must recommend a patch "
+                "with direct causal support"
+            )
         evidence_error = _evidence_error(
             parsed_params.evidence,
             self._evidence_validator,
@@ -189,12 +203,6 @@ class ProposePatchTool(BaseTool):
         if evidence_error is not None:
             return _validation_error(evidence_error)
         try:
-            try:
-                diagnosis = self._store.read_diagnosis(self._incident_id)
-            except FileNotFoundError as exc:
-                raise PatchError(
-                    "submit_diagnosis must succeed before propose_patch"
-                ) from exc
             target = resolve_workspace_path(
                 self._workspace_root,
                 parsed_params.path,
@@ -335,6 +343,11 @@ class SubmitDiagnosisTool(BaseTool):
                 },
             },
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "causal_support": {
+                "type": "string",
+                "enum": ["direct", "inferred"],
+            },
+            "patch_recommended": {"type": "boolean"},
         },
         "required": [
             "category",
@@ -342,6 +355,8 @@ class SubmitDiagnosisTool(BaseTool):
             "root_cause",
             "evidence",
             "confidence",
+            "causal_support",
+            "patch_recommended",
         ],
     }
 
@@ -371,6 +386,8 @@ class SubmitDiagnosisTool(BaseTool):
             root_cause=parsed.root_cause,
             evidence=parsed.evidence,
             confidence=parsed.confidence,
+            causal_support=parsed.causal_support,
+            patch_recommended=parsed.patch_recommended,
             created_at=datetime.now(UTC),
         )
         self._store.write_diagnosis(diagnosis)

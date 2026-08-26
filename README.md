@@ -90,6 +90,9 @@ read_file, list_dir, search_text, read_job_log, submit_diagnosis, propose_patch
 或执行 Sandbox。每轮最多 12 steps；serialized system、messages 和 tool schemas 的总输入不
 超过 128 KiB，初始 selector 证据不超过 32 KiB。
 
+Diagnosis 同时声明 `causal_support`（`direct`/`inferred`）和 `patch_recommended`；只有直接证据
+支撑且明确推荐补丁时，`propose_patch` 才会继续进入既有工作区与 Git 校验。
+
 补丁仅支持对一个已有、不超过 1 MiB 的 UTF-8 文件做一次精确唯一替换。批准前只写 Incident
 artifact；非 Git workspace 可以诊断和审阅 diff，但不能一键应用。
 

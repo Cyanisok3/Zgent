@@ -75,5 +75,18 @@ The committed machine-readable and Markdown summaries are in
 observations, 45 valid fault Incident observations, and 9 normal product controls; no infrastructure
 error is included in capability metrics.
 
-The automatic category and causal-mechanism fields are strict keyword lower bounds. They remain
-pending independent blinded human review and must not be presented as final semantic accuracy.
+The automatic category and causal-mechanism fields are strict keyword lower bounds. Final semantic
+scores come from two independent baseline-blind reviewers, a rubric-calibrated disagreement retest,
+and third-reviewer adjudication. Raw agreement and its selected-subset limitation are reported in
+[`reports/formal-v1/human-review.md`](reports/formal-v1/human-review.md).
+
+新的诊断运行使用 `causal-support-abstention-v1` prompt 版本：诊断同时声明
+`causal_support` 和 `patch_recommended`。Incident Track B 的 artifact 只保存有界诊断摘要，
+并单独统计正确 abstention、错失可修复机会和 abstention gate 违规；这些新结果写入新的
+run-set，不覆盖 `formal-v1`。可用 `incident_review_export.py` 生成只评审 Incident
+`root_cause` 的匿名 packet。
+
+```bash
+python benchmarks/incident_review_export.py --run-set <name> --split dev \
+  --output /tmp/incident-review.csv --key /tmp/incident-review-key.json
+```

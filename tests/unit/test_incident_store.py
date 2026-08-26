@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cyan.training.incidents.models import Incident
+from cyan.training.incidents.models import Diagnosis, Incident
 from cyan.training.incidents.store import IncidentStore
 
 
@@ -54,3 +54,29 @@ def test_incident_requires_absolute_workspace() -> None:
             created_at=now,
             updated_at=now,
         )
+
+
+# 功能：验证旧诊断 JSON 缺少新字段时使用安全默认值
+# 设计：直接模拟未迁移的持久化对象，确保读取不会要求数据迁移或默认推荐补丁
+def test_old_diagnosis_defaults_to_inferred_abstention() -> None:
+    diagnosis = Diagnosis.model_validate(
+        {
+            "id": "diagnosis-1",
+            "incident_id": "incident-1",
+            "category": "runtime",
+            "summary": "observed crash",
+            "root_cause": "unknown",
+            "evidence": [
+                {
+                    "source": "stderr",
+                    "reference": "bytes 1:2",
+                    "description": "crash",
+                }
+            ],
+            "confidence": 0.5,
+            "created_at": datetime.now(UTC),
+        }
+    )
+
+    assert diagnosis.causal_support == "inferred"
+    assert diagnosis.patch_recommended is False

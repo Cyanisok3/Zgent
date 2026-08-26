@@ -26,6 +26,9 @@ benchmarks/reports/*
 !benchmarks/reports/formal-v1/
 !benchmarks/reports/formal-v1/report.json
 !benchmarks/reports/formal-v1/report.md
+benchmarks/review-key.json
+benchmarks/review-calibration-key.json
+benchmarks/review-calibration-retest-key.json
 .idea/
 node_modules/
 .DS_Store
@@ -33,3 +36,4 @@ node_modules/
 *.vsix
 workspace/
 /user-tests/FastestDet-cyan/
+/mattpocock-skills/

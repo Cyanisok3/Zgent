@@ -29,6 +29,12 @@ def test_transition_table_edges() -> None:
             assert transition(state, event) == target
 
 
+# 功能：验证快速 Smoke 在 applying 状态可直接进入成功态
+# 设计：覆盖进程身份回调尚未持久化前已退出的成功路径
+def test_fast_smoke_success_from_applying() -> None:
+    assert transition("applying", Event.SMOKE_PASSED) == "smoke_passed"
+
+
 # 功能：验证表未声明的状态/事件组合会抛出 IllegalTransitionError
 # 设计：对每个状态枚举其表外事件，确保非法转移 fail-loud 而非静默
 def test_transition_rejects_unlisted_events() -> None:

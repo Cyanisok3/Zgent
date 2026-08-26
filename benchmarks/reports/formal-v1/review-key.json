@@ -1,0 +1,871 @@
+{
+  "packet_version": 1,
+  "run_set": "formal-v1",
+  "shuffle_seed": 20260825,
+  "items": {
+    "867be33e58c3": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "5eadce64bd0c": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "3b7ee0e402c3": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "bf00a3a6a552": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "5e1cd68e6fef": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "26470b78a827": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "b2a8c034d269": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "0419f2aa670b": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "d191291f0d44": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "6f935bbf0abd": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "1c2dc4121675": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "dba8d8e3693e": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "8f5c587715f7": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "b4ae643645e5": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "f49b7c6fa575": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "6f97fedc262a": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "2fc055b10074": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "00b6e0777536": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "76e8cbab2296": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "be0874c1c272": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "4bb2dbe01eef": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "e4498ba5ede9": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "79ab7df3c628": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "9f7b05a88e79": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "0765b5661b6a": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "ecb6eeb79a09": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "37dd9a40adf4": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "27a5b43ec6ff": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "189a8e22963c": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "c1180e792568": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "1cc22695f364": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "941dafac1056": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "9d34bf30000d": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "d7f9aacbb791": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "92026355f164": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "11dfddad7d45": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "52a74ae1e9a5": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "abeaf7e5c0b3": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "cfbd826222aa": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "20d88d095227": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "16f6853ccd78": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "f59b496fd9d3": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "5d8524d25a36": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "4054fc2f2e47": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "a7a61f85ca7d": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "5bee23ba9770": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "d2c4a0c77b58": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "c4ce3b5e2a00": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "8e6f908101ff": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "f84c059c6609": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "ff4302ebb9ba": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "62389a19f9a6": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "d0074e3cc33a": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "fbfdfea2e2e2": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "d0db4a86476b": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "53f0e3547172": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "cc8c87d7bdb6": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "4e515707b66d": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "1c21ac91b9a9": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "16b9a317e04d": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "9f091cb2003d": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "c2fe820c99a2": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "9368626c5767": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "a0988606425b": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "b42ff9e3881b": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "c2aac35d782b": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "03917f1be513": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "914fb9f40b08": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "d7ed7a83bc8e": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "d64cc40dec3a": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "fd8ab2f086d2": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "5311bca675bf": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "440492ae18f4": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "f92121fa7c01": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "469386f447d7": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "c427d3398bc5": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "5d5c2451e68f": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "907ca0d04aa6": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "dbb8eb4b1f8b": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "14fd67458090": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "81cdb8413c52": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "fb0b632bb362": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "3855b32f3c50": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "24f7d43c1e29": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "e909b786a80a": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "c04bc1a18d79": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "b4bce46825d3": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "65309ac8e4c0": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "15f53d1bd0b5": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "e8f1a837310e": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "95026d1c6a1a": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "a4e7ec4c5f01": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "cf14974582d8": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "214bdc03fb91": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "789d403171b4": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "955372f1784e": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "a2c06bea86fd": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "e0ebe88e0755": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "d8adf6c7da7e": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "bddad5e39c68": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "54dbf73f03be": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "f11b31e99735": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "a92191f553d1": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "026f0dc582ff": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "c544a0261a07": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "632776932be1": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "c8143a8c1a90": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "e79eb9a42443": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "6b007ecff331": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "159dd2846df1": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "cf73ad237f36": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "d5c296000e8a": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "5a6c636ec291": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "1b0aaa1bb352": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "48d7d3f6cdd9": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "33dd2e52e1c5": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "5ae1b99ef4fc": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "95b84cee6025": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "1775f704460c": {
+      "case_id": "sb3-265-ppo-single-sample",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "8a382fe2422a": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "23152983c1ea": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "full_native",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "8def25840cad": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "2a0809c2368c": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "full_native",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "109a73219bbe": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "202b631d9ede": {
+      "case_id": "pyg-7306-late-edge-index",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "7cefedc8bb56": {
+      "case_id": "sb3-2207-multidimensional-action",
+      "baseline": "cyan_selector_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "7805cd9074b9": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "fa8e31d01687": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "a213d5181f3b": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "fdd7610f1469": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "6a2780e9cc90": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "96d857ad2acf": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "cyan_selector_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "5c2933c2e4cb": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "d8e6f2093bc3": {
+      "case_id": "hf-17875-short-final-block",
+      "baseline": "bm25_32",
+      "repeat": 1,
+      "variant": "control"
+    },
+    "c862be6ba8e5": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "5224046ee2f4": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "tail_32",
+      "repeat": 3,
+      "variant": "buggy"
+    },
+    "e775c9ba464d": {
+      "case_id": "hf-28293-attention-save-heldout",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "1365e3e8e1ce": {
+      "case_id": "hf-11102-late-token",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "6dce1d2a2645": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "full_native",
+      "repeat": 2,
+      "variant": "control"
+    },
+    "1206b38b80ab": {
+      "case_id": "sb3-1694-reset-predict",
+      "baseline": "bm25_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "109ac80016b3": {
+      "case_id": "hf-35609-best-checkpoint",
+      "baseline": "bm25_32",
+      "repeat": 3,
+      "variant": "control"
+    },
+    "33b6ae0e7f3f": {
+      "case_id": "hf-17875-short-final-block-heldout",
+      "baseline": "tail_32",
+      "repeat": 2,
+      "variant": "buggy"
+    },
+    "f91258af3385": {
+      "case_id": "hf-34400-empty-clm-dataset",
+      "baseline": "tail_32",
+      "repeat": 1,
+      "variant": "buggy"
+    },
+    "259be35e3f00": {
+      "case_id": "hf-11102-tokenizer-resize",
+      "baseline": "cyan_selector_32",
+      "repeat": 3,
+      "variant": "control"
+    }
+  }
+}

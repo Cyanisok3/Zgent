@@ -20,6 +20,8 @@ from cyan_bench.models import (
     SelectionArtifact,
 )
 
+DIAGNOSIS_PROMPT_VERSION = "causal-support-abstention-v1"
+
 _SYSTEM = """You diagnose whether a local machine-learning training process failed.
 Use only the supplied process metadata and log evidence. There are no tools.
 Return exactly one JSON object and no Markdown:
@@ -29,12 +31,20 @@ Return exactly one JSON object and no Markdown:
     "category": "short category",
     "culprit": "specific file, component, setting, or contract",
     "causal_mechanism": "why the observed process outcome occurred",
+    "causal_support": "direct" | "inferred",
     "evidence": [{"source": "stdout|stderr", "start": 0, "end": 1}]
   },
   "patch_recommended": true | false
 }
 For a successful run without causal failure evidence, use no_fault, null, and false.
-Do not infer a patch merely because warnings exist."""
+When causal_support is direct, locate the earliest evidence-backed upstream configuration,
+data contract, component, or producer rather than only the traceback leaf. When it is inferred,
+root_cause must begin with "Inference — not directly established by observed evidence:" and
+must not invent an unobserved file, setting, variable, or dependency version.
+Set patch_recommended=true only when the observed cause is a local workspace change in one
+existing file with one exact replacement and the original command can verify it. For external
+data, environment or framework limitations, dependency changes, multi-file fixes, or insufficient
+evidence, set patch_recommended=false. Do not infer a patch merely because warnings exist."""
 
 DIAGNOSIS_MAX_OUTPUT_TOKENS = 8192
 DIAGNOSIS_TEMPERATURE = 0
@@ -128,6 +138,7 @@ async def run_diagnosis(
         baseline=selection.baseline,
         repeat=capture.repeat,
         is_control=is_control,
+        prompt_version=DIAGNOSIS_PROMPT_VERSION,
         status=status,
         model_requested=model,
         model_resolved=getattr(response, "model", None),

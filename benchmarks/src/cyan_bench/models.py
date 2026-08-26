@@ -192,6 +192,7 @@ class DiagnosisRunArtifact(BaseModel):
     baseline: Baseline
     repeat: int = Field(ge=1)
     is_control: bool
+    prompt_version: str = "legacy"
     status: Literal["success", "schema_error", "context_overflow", "infrastructure_error"]
     model_requested: str
     model_resolved: str | None = None
@@ -215,15 +216,27 @@ class IncidentBenchmarkArtifact(BaseModel):
     case_id: str
     repeat: int = Field(ge=1)
     is_control: bool
+    prompt_version: str = "legacy"
     job_id: str
     incident_id: str | None = None
     final_job_status: str
     final_incident_status: str | None = None
     spurious_incident: bool = False
     diagnosis_present: bool = False
+    diagnosis_category: str | None = None
+    diagnosis_root_cause: str | None = None
+    diagnosis_causal_support: Literal["direct", "inferred"] | None = None
+    diagnosis_patch_recommended: bool | None = None
+    diagnosis_evidence_refs: list[dict[str, object]] = Field(
+        default_factory=list,
+        max_length=32,
+    )
     proposal_present: bool = False
     proposal_valid: bool = False
     unsafe_proposal: bool = False
+    correct_patch_abstention: bool = False
+    missed_patch_opportunity: bool = False
+    abstention_gate_violated: bool = False
     resolved: bool = False
     capsule_tail_bytes: int = Field(ge=0)
     selector_selected_bytes: int = Field(ge=0)

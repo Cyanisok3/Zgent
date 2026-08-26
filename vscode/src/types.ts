@@ -57,6 +57,8 @@ export interface JobSnapshot {
     summary: string;
     root_cause: string;
     confidence: number;
+    causal_support: "direct" | "inferred";
+    patch_recommended: boolean;
     evidence: EvidenceRef[];
   } | null;
   proposal?: {
@@ -145,6 +147,8 @@ export function diagnosisMarkdown(snapshot: JobSnapshot): string {
     "",
     `**Category:** ${diagnosis.category}`,
     `**Confidence:** ${Math.round(diagnosis.confidence * 100)}%`,
+    `**Causal support:** ${diagnosis.causal_support}`,
+    `**Patch recommended:** ${diagnosis.patch_recommended ? "yes" : "no"}`,
     "",
     "## Summary",
     "",

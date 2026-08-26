@@ -37,6 +37,7 @@ DiagnosisCategory = Literal[
     "runtime",
     "unknown",
 ]
+CausalSupport = Literal["direct", "inferred"]
 EvidenceSource = Literal["stdout", "stderr", "workspace"]
 ChangeType = Literal["create", "modify", "delete"]
 
@@ -90,6 +91,8 @@ class Diagnosis(BaseModel):
     root_cause: str = Field(min_length=1, max_length=8000)
     evidence: list[EvidenceRef] = Field(min_length=1, max_length=32)
     confidence: float = Field(ge=0.0, le=1.0)
+    causal_support: CausalSupport = "inferred"
+    patch_recommended: bool = False
     created_at: datetime
 
 

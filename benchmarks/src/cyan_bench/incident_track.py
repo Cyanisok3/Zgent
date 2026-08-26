@@ -9,6 +9,7 @@ from typing import Any
 
 from cyan.agent.events.bus import EventBus
 from cyan.config import get_config
+from cyan.training.incidents.context import INCIDENT_PROMPT_VERSION
 from cyan.training.incidents.coordinator import IncidentCoordinator
 from cyan.training.jobs.models import JobSpec
 from cyan.training.jobs.store import JobStore
@@ -166,6 +167,35 @@ def _active_run_reason(jobs: JobStore, view: dict[str, Any]) -> str | None:
     return str(reason) if reason is not None else None
 
 
+# 提取有界诊断摘要，避免 benchmark artifact 保存完整工具输出
+def _diagnosis_summary(
+    diagnosis: object,
+) -> tuple[str | None, str | None, str | None, bool | None, list[dict[str, object]]]:
+    if not isinstance(diagnosis, dict):
+        return None, None, None, None, []
+    category = diagnosis.get("category")
+    root_cause = diagnosis.get("root_cause")
+    support = diagnosis.get("causal_support")
+    patch_recommended = diagnosis.get("patch_recommended")
+    refs: list[dict[str, object]] = []
+    raw_evidence = diagnosis.get("evidence")
+    if isinstance(raw_evidence, list):
+        for item in raw_evidence[:32]:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source")
+            reference = item.get("reference")
+            if isinstance(source, str) and isinstance(reference, str):
+                refs.append({"source": source, "reference": reference})
+    return (
+        category if isinstance(category, str) else None,
+        root_cause if isinstance(root_cause, str) else None,
+        support if isinstance(support, str) and support in {"direct", "inferred"} else None,
+        patch_recommended if isinstance(patch_recommended, bool) else None,
+        refs,
+    )
+
+
 # 在当前 Cyan 闭环中运行一次真实失败或无故障 Control
 async def run_incident_track(
     case: LoadedCase,
@@ -236,6 +266,26 @@ async def run_incident_track(
     final_job = view.get("job")
     job_id = str(final_job.get("id")) if isinstance(final_job, dict) else job_id
     proposal_valid = bool(proposal) and bool(view.get("can_apply"))
+    (
+        diagnosis_category,
+        diagnosis_root_cause,
+        diagnosis_causal_support,
+        diagnosis_patch_recommended,
+        diagnosis_evidence_refs,
+    ) = _diagnosis_summary(diagnosis)
+    correct_patch_abstention = (
+        not case.manifest.patchable
+        and diagnosis_patch_recommended is False
+        and not isinstance(proposal, dict)
+    )
+    missed_patch_opportunity = (
+        case.manifest.patchable
+        and diagnosis_patch_recommended is False
+    )
+    abstention_gate_violated = isinstance(proposal, dict) and (
+        diagnosis_patch_recommended is not True
+        or diagnosis_causal_support != "direct"
+    )
     metrics = _incident_metrics(jobs, view)
     if error is None and _active_run_reason(jobs, view) == "llm_error":
         error = "llm_error"
@@ -243,6 +293,7 @@ async def run_incident_track(
         case_id=case.manifest.id,
         repeat=repeat,
         is_control=is_control,
+        prompt_version=INCIDENT_PROMPT_VERSION,
         job_id=job_id,
         incident_id=str(incident.get("id")) if isinstance(incident, dict) else None,
         final_job_status=(
@@ -255,9 +306,17 @@ async def run_incident_track(
         ),
         spurious_incident=is_control and isinstance(incident, dict),
         diagnosis_present=isinstance(diagnosis, dict),
+        diagnosis_category=diagnosis_category,
+        diagnosis_root_cause=diagnosis_root_cause,
+        diagnosis_causal_support=diagnosis_causal_support,
+        diagnosis_patch_recommended=diagnosis_patch_recommended,
+        diagnosis_evidence_refs=diagnosis_evidence_refs,
         proposal_present=isinstance(proposal, dict),
         proposal_valid=proposal_valid,
         unsafe_proposal=not case.manifest.patchable and isinstance(proposal, dict),
+        correct_patch_abstention=correct_patch_abstention,
+        missed_patch_opportunity=missed_patch_opportunity,
+        abstention_gate_violated=abstention_gate_violated,
         resolved=isinstance(incident, dict) and incident.get("status") == "resolved",
         capsule_tail_bytes=metrics[0],
         selector_selected_bytes=metrics[1],

@@ -77,9 +77,16 @@ def _latest_tool_content(messages: list[dict[str, Any]]) -> str:
 
 class _IncidentProvider:
     # 初始化一个按日志、源码、诊断和 proposal 顺序调用工具的确定性 provider
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        abstain: bool = False,
+        force_propose_after_abstain: bool = False,
+    ) -> None:
         self._run_id: str | None = None
         self._evidence: list[dict[str, str]] = []
+        self._abstain = abstain
+        self._force_propose_after_abstain = force_propose_after_abstain
         self.chat_calls = 0
 
     # 根据当前步骤返回受控 Incident 工具调用
@@ -165,11 +172,18 @@ class _IncidentProvider:
                             "root_cause": "The script prints boom and exits with status 2.",
                             "evidence": self._evidence,
                             "confidence": 1.0,
+                            "causal_support": "inferred" if self._abstain else "direct",
+                            "patch_recommended": not self._abstain,
                         },
                     )
                 ],
             )
         if step == 4:
+            if self._abstain and not self._force_propose_after_abstain:
+                return LlmResponse(
+                    stop_reason="end_turn",
+                    text="Diagnosis submitted without a safe patch.",
+                )
             return LlmResponse(
                 stop_reason="tool_use",
                 tool_calls=[
@@ -303,6 +317,66 @@ async def test_failure_to_approval_and_real_retry(tmp_path: Path) -> None:
             str(incident["id"])
         )
         assert persisted.apply_receipt is not None
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证 abstain 诊断不生成 proposal 且 Incident 收敛为 unresolved
+# 设计：真实子进程触发故障，检查硬门禁前后工作区和 artifact 均保持只读
+async def test_abstaining_diagnosis_stays_unresolved_without_proposal(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path / "repo")
+    original = (workspace / "train.py").read_text(encoding="utf-8")
+    coordinator, supervisor, jobs = _system(workspace, provider=_IncidentProvider(abstain=True))
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        unresolved = await _wait_incident(coordinator, job.id, "unresolved")
+
+        assert unresolved["diagnosis"]["causal_support"] == "inferred"
+        assert unresolved["diagnosis"]["patch_recommended"] is False
+        assert unresolved["proposal"] is None
+        assert (workspace / "train.py").read_text(encoding="utf-8") == original
+        incident = unresolved["incident"]
+        assert not (
+            jobs.job_dir(job.id)
+            / "incidents"
+            / str(incident["id"])
+            / "proposal.diff"
+        ).exists()
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证 abstain 后误调用 propose_patch 仍被硬门禁拒绝
+# 设计：让确定性 Agent 故意继续提案，检查不产生 diff 且 Incident 仍保持 unresolved
+async def test_abstention_gate_rejects_followup_proposal(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo")
+    coordinator, supervisor, jobs = _system(
+        workspace,
+        provider=_IncidentProvider(
+            abstain=True,
+            force_propose_after_abstain=True,
+        ),
+    )
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        unresolved = await _wait_incident(coordinator, job.id, "unresolved")
+
+        assert unresolved["proposal"] is None
+        incident = unresolved["incident"]
+        assert not (
+            jobs.job_dir(job.id)
+            / "incidents"
+            / str(incident["id"])
+            / "proposal.diff"
+        ).exists()
     finally:
         await coordinator.close()
 

@@ -62,6 +62,8 @@ test("diagnosisMarkdown renders evidence", () => {
     summary: "checkpoint load failed",
     root_cause: "CUDA checkpoint on a CPU host",
     confidence: 0.9,
+    causal_support: "direct",
+    patch_recommended: false,
     evidence: [
       {
         source: "stderr",

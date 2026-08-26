@@ -55,6 +55,8 @@ TRANSITIONS: dict[IncidentStatus, dict[Event, IncidentStatus]] = {
     },
     "applying": {
         Event.APPLY_OK_SMOKE: "smoke_running",
+        # 快速 Smoke 可能在进程身份持久化前已经退出并成功完成。
+        Event.SMOKE_PASSED: "smoke_passed",
         Event.APPLY_OK_NO_SMOKE: "smoke_skipped",
         Event.APPLY_FAILED: "stale",
         Event.SMOKE_FAILED_ROLLED_BACK: "diagnosing",

@@ -1,0 +1,4292 @@
+item_id,case_alias,case_context,verdict,category,culprit,mechanism,gold_evidence,candidate_evidence,patch_intent,verdict_correct,category_score,culprit_score,mechanism_score,evidence_support_score,patch_intent_correct,needs_adjudication,review_note
+867be33e58c3,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+5eadce64bd0c,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+Action dimension type error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py:336 in proba_distribution_net","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The action space configuration for multidimensional actions yields action_dims as a list containing a numpy array (e.g., np.array([...])), but the code expects a tuple of ints. When constructing the nn.Linear layer, torch.empty receives that numpy array as an element of the size tuple, causing a TypeError.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+3b7ee0e402c3,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Numerical instability","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+RolloutBuffer size of 1 (n_steps=1, n_envs=1) with default batch_size=2","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The rollout buffer contains only one sample, so during PPO update the advantage normalization computes std of a single element, which is NaN (degrees of freedom <= 0). This NaN propagates through the policy update, corrupting model parameters and causing NaN logits in the subsequent forward pass, which triggers a ValueError in the Categorical distribution.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=4 end=5
+[stderr] start=37 end=38","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+bf00a3a6a552,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+5e1cd68e6fef,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+out-of-bounds index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+graph.edge_index generation (likely in cyan_bench_train.py data loading)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The training loop creates graphs with 4 nodes but at graph 81 the edge_index contains a node ID of 5, which exceeds the valid range 0-3. This triggers an IndexError during GCN normalization when indexing deg_inv_sqrt, causing the run to fail.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=2988
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+26470b78a827,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+IndexError: embedding index out of range","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+tokenizer/model vocabulary size mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+During training, input token IDs exceed the model's embedding vocabulary size, causing the embedding lookup to fail with an IndexError. This likely results from a discrepancy between the tokenizer's vocabulary and the model's embedding layer size, possibly due to improper tokenization or a misconfigured model.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1789, 'grad_norm': 2.6926820278167725, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163360-163379] training-step=1190
+{'loss': 1.5834, 'grad_norm': 1.757123589515686, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=4400 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+b2a8c034d269,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+0419f2aa670b,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+out-of-bounds edge index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+graph edge_index generation in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index of the graph contains node indices (e.g., 5) that exceed the number of nodes (4), causing gcn_norm to index deg_inv_sqrt with an out-of-range index, leading to an IndexError.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d191291f0d44,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+6f935bbf0abd,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Missing checkpoint file","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+trainer checkpoint saving configuration","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempts to compare the current checkpoint with the best model checkpoint using os.path.samefile, but the checkpoint path 'outputs/checkpoint-2' does not exist, likely because checkpoints were not saved correctly or were removed, causing a FileNotFoundError during the final model selection phase.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+1c2dc4121675,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+Incorrect reset handling","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+evaluation.reset() call in script line 50","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The evaluation environment's reset() returns a (observation, info) tuple per Gymnasium API, but model.predict expects a raw observation array. The tuple is passed to np.array(), causing a shape mismatch (inhomogeneous shape) and ValueError.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+dba8d8e3693e,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+Data collator mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+data collator (default) not padding variable-length sequences","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The dataset yields examples with sequences of different lengths, and the default data collator attempts to stack them directly, causing a tensor size mismatch error.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81955-81973] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858690977096558, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+8f5c587715f7,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+b4ae643645e5,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+action space type mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+action_dims attribute in distributions.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The policy initialization attempts to create a linear layer with output size `sum(self.action_dims)`, but `self.action_dims` is a numpy array rather than a list of integers, causing `sum()` to yield a numpy array, which is rejected by `nn.Linear`.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+f49b7c6fa575,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+IndexError in embedding lookup","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+tokenizer/model vocab size mismatch or data collator producing out-of-range token ids","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+During the forward pass at step 1201, an input token id exceeded the size of the embedding matrix, causing torch.embedding to raise an IndexError. This likely stems from a tokenizer vocabulary size smaller than the model's expected vocabulary, or from data preprocessing that generates token ids outside the valid range.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1789, 'grad_norm': 2.6926820278167725, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163360-163379] training-step=1190
+{'loss': 1.5834, 'grad_norm': 1.757123589515686, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=45 end=51","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+6f97fedc262a,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+incorrect environment reset handling","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The training script calls model.predict(evaluation.reset(), deterministic=True) but in Gymnasium API, env.reset() returns a tuple (obs, info). The code passes the entire tuple as observation, causing np.array to fail with inhomogeneous shape.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+2fc055b10074,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty training dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py line 53: dataset construction with Blocks(blocks) where blocks=0","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The dataset is empty because grouping produced 0 blocks (source_tokens=63, block_size=131072). Trainer attempts to create a RandomSampler over zero samples, raising ValueError.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+00b6e0777536,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+vocabulary size mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The tokenizer used to encode inputs produces token IDs that exceed the model's embedding weight size. During the forward pass, the word_embeddings lookup receives an out-of-range index, causing an IndexError. This mismatch likely arises because the tokenizer was configured with a larger vocabulary than the model's vocab_size, or the tokenizer special tokens were not properly aligned with the model's embedding dimension.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1967, 'grad_norm': 2.300987958908081, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163334-163353] training-step=1190
+{'loss': 1.6113, 'grad_norm': 1.893932580947876, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+76e8cbab2296,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+outputs/checkpoint-2","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempts to compare the current checkpoint with the best checkpoint via os.path.samefile, but the checkpoint directory 'outputs/checkpoint-2' does not exist, leading to a FileNotFoundError. This likely occurs because the checkpoint saving or path resolution setup is incorrect, or a previously expected checkpoint was not created.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+be0874c1c272,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+4bb2dbe01eef,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+out-of-bounds node index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py (graph data generation)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The graph passed to the GCN model contains an edge_index with a node index exceeding the number of nodes (size 4), causing an IndexError in gcn_norm when indexing deg_inv_sqrt.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=2048 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e4498ba5ede9,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+API misuse","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py line 50 (model.predict(evaluation.reset(), deterministic=True))","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+evaluation.reset() returns a (observation, info) tuple from a Gymnasium environment, but model.predict expects a single observation array. Passing the tuple causes np.array() to attempt creating an array with inhomogeneous shapes, raising a ValueError.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+79ab7df3c628,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+type mismatch in action_dim computation","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+action_dims in MultiCategoricalDistribution (or related distribution) is a list of numpy arrays instead of a list of ints, causing sum() to return a numpy array","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+During PPO policy initialization for a multidimensional discrete action space, the code constructs a linear layer with output size `sum(self.action_dims)`. If `self.action_dims` is a list of numpy arrays (e.g., because the environment's `nvec` was not converted to plain ints), Python's built-in `sum` combines those arrays into a single numpy array. Passing this array as `out_features` to `nn.Linear` leads PyTorch to attempt `torch.empty((out_features, in_features))`, where the tuple contains a numpy array instead of ints, causing the TypeError.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+9f7b05a88e79,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+prediction input shape mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+model.predict call in cyan_bench_train.py line 50 with evaluation.reset() output","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+After training, the script calls model.predict(evaluation.reset(), deterministic=True). The evaluation environment reset likely returns a non-vectorized observation (e.g., a tuple or list of observations) that np.array cannot convert to a consistent array shape, raising ValueError due to inhomogeneous shape. This occurs because the predict method expects a vectorized observation (e.g., a single array with batch dimension), but the reset output is not properly vectorized.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+0765b5661b6a,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+model-tokenizer mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+model_config.vocab_size vs tokenizer vocabulary size","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+During training, input token IDs generated by the tokenizer include indices that exceed the model's embedding table size. This occurs because the model was configured with a smaller vocab_size than the tokenizer's actual vocabulary (or the tokenizer added special tokens beyond the model's capacity), causing torch.embedding to raise IndexError when looking up embeddings.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1967, 'grad_norm': 2.300987958908081, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163334-163353] training-step=1190
+{'loss': 1.6113, 'grad_norm': 1.893932580947876, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=4641 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+ecb6eeb79a09,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+invalid edge indices","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+training graph data generation (edge_index contains node index 5 for graph with 4 nodes)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index tensor includes an edge referencing node index 5, while the graph has only 4 nodes (indices 0-3). During GCN normalization, deg_inv_sqrt indexed by these node IDs throws an IndexError because the index exceeds the tensor size (4).","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+37dd9a40adf4,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+27a5b43ec6ff,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+index out of bounds","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py (tokenizer/model vocabulary mismatch)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The input batch contains token IDs that are greater than the model's embedding vocabulary size, causing torch.embedding to raise IndexError when retrieving embeddings.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.2055, 'grad_norm': 2.1612141132354736, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163302-163321] training-step=1190
+{'loss': 1.6258, 'grad_norm': 1.6870911121368408, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+189a8e22963c,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+TypeError in action distribution construction","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+action_dims in stable_baselines3/common/distributions.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The multidimensional action space is parsed incorrectly, yielding action_dims as numpy arrays instead of scalar integers. This causes torch.nn.Linear to receive numpy arrays for the input size, triggering a TypeError during model setup.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c1180e792568,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+1cc22695f364,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor saving","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model contains a non-contiguous tensor (likely due to slicing or reshaping in the attention implementation) that fails safetensors saving, because safetensors requires contiguous tensors. The training loop completes but the save_model call raises ValueError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=876 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+941dafac1056,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+9d34bf30000d,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+incorrect action space definition","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+environment action space (likely defined with numpy arrays) resulting in non-integer action_dims","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+When constructing the PPO policy, the action distribution's `action_dims` are derived from the environment's action space. If the action space is defined with numpy arrays (e.g., `np.array([...])`), `sum(self.action_dims)` returns a numpy array, which is passed as the `out_features` argument to `nn.Linear`. PyTorch's `nn.Linear` expects an integer, causing the `TypeError: empty(): argument 'size' (position 1) must be tuple of ints`.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d7f9aacbb791,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+API misuse","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py line 50","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The environment's reset() returns a tuple (observation, info) as per the gymnasium API, but model.predict expects a single observation array. Passing the tuple causes np.array() to fail due to inhomogeneous shape.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+92026355f164,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py: dataset construction / Blocks class","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The dataset has zero blocks (grouped_blocks=0) because the token source (63 tokens) is shorter than the block_size (131072), resulting in an empty training dataset. The Trainer's RandomSampler then raises ValueError because num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=1
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+11dfddad7d45,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collation error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+transformers/data/data_collator.py (default_data_collator) or dataset preparation","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The default data collator tries to stack tensors of different lengths (8 and 7) because the batch contains sequences of unequal length without padding, causing a RuntimeError and aborting training.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81955-81973] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858690977096558, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+52a74ae1e9a5,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint file","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+cyan_bench_train.py TrainingArguments configuration (save_strategy not set to save checkpoints)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The training script configured load_best_model_at_end and metric_for_best_model but did not enable saving of checkpoints (save_strategy was not set to 'steps' or 'epoch'), so no checkpoint files were written. When the trainer attempts to compare the current checkpoint with best_model_checkpoint at the end of training, the referenced file does not exist, causing a FileNotFoundError.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1000 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+abeaf7e5c0b3,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+dataset construction","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py: Blocks grouping","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The training dataset is empty because the token streaming and grouping produced zero blocks (grouped_blocks=0), likely due to insufficient tokens or mismatched block sizing; the Trainer then fails when creating a RandomSampler with num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=1600 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+cfbd826222aa,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor save error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model's attention layer creates a non-contiguous weight tensor, likely from a slicing or reshaping operation, and safetensors refuses to save non-contiguous tensors, causing the save_model call to fail after training.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=876 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+20d88d095227,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+16f6853ccd78,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+f59b496fd9d3,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+5d8524d25a36,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+4054fc2f2e47,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+action space type mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+cyan_bench_train.py environment action space definition","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The environment's action space is defined with numpy arrays instead of Python integers, causing `self.action_dims` in SB3's `MultiCategoricalDistribution` to contain `numpy.ndarray` elements. When `nn.Linear` attempts to use `sum(self.action_dims)` as the output size, it fails because the sum returns a non-tuple value containing an ndarray, triggering a TypeError.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+a7a61f85ca7d,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+Out-of-bounds edge index in graph data","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py data generation or graph.edge_index construction","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+Training graph 81 has a node count of 4 (features tensor dimension 0 size 4) but an edge index that references node 5, causing an IndexError in gcn_norm when computing deg_inv_sqrt for that node. This indicates the edge indices are not aligned with the actual number of nodes, likely due to a bug where edges are added after the node count is fixed.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=2988
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5bee23ba9770,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Numerical instability due to degenerate configuration","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+cyan_bench_train.py (n_steps=1, n_envs=1, batch_size=2)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+PPO training with a single rollout sample (n_steps=1, n_envs=1) produces a RolloutBuffer of size 1. The advantage normalization in ppo.py (line 210) then computes std on a single element, causing numerical issues (warning about degrees of freedom). This leads to unstable gradient updates, corrupting network parameters and resulting in NaN logits in the next forward pass, which triggers the ValueError in Categorical distribution.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=3840
+[stderr] start=0 end=2048","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d2c4a0c77b58,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+c4ce3b5e2a00,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+8e6f908101ff,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+f84c059c6609,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+NaN logits due to incompatible hyperparameters","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+batch_size=2 with n_steps=1 and n_envs=1","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The rollout buffer size is n_steps * n_envs = 1, but the mini-batch size is 2, causing a truncated mini-batch of size 1. During advantage normalization, the standard deviation of a single-element batch is 0, leading to NaN in normalized advantages. This propagates to the policy loss and results in NaN action logits, crashing the training.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4233","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+ff4302ebb9ba,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+reset/predict API mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py line 50: model.predict(evaluation.reset(), deterministic=True)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+evaluation.reset() returns a tuple (observation, info) under the Gymnasium API, but stable-baselines3's predict expects a single observation array. The tuple is passed to obs_to_tensor, which attempts np.array(observation) on a sequence of two elements with inhomogeneous shapes, causing ValueError.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337
+[stderr] start=903 end=1086","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+62389a19f9a6,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Checkpoint file missing","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+outputs/checkpoint-2 path issue in Trainer checkpoint comparison","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The Trainer attempted to compare the current checkpoint with the best_model_checkpoint, but the checkpoint file 'outputs/checkpoint-2' does not exist, likely because checkpoint saving was not properly configured or the checkpoint was deleted.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d0074e3cc33a,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+fbfdfea2e2e2,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty training dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+Blocks dataset in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The dataset is empty because grouped_blocks=0, likely due to block size (131072) exceeding the token count (63), or insufficient input data. This causes RandomSampler to receive num_samples=0 and raise ValueError.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1708
+[stdout] start=0 end=52","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d0db4a86476b,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+type error in action dimension computation","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py line 336","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+sum(self.action_dims) returns a numpy.ndarray because action_dims contains numpy integer elements, and torch.empty expects a tuple of ints, causing TypeError.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1566 end=1773","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+53f0e3547172,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Non-contiguous tensor saving","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+During model training, the weights of the query projection in the first encoder attention layer became non-contiguous (likely due to slicing or reshaping operations in the custom model code). When trainer.save_model() attempts to serialize the model using safetensors, the library rejects non-contiguous tensors with a ValueError, causing the training script to exit with code 1 and preventing successful model saving.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+cc8c87d7bdb6,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+data/edge-index mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+graph.edge_index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index contains node IDs that exceed the number of nodes (size 4), causing deg_inv_sqrt indexing to go out of bounds. This is likely due to incorrectly generated or late-assigned edge indices that reference non-existent nodes.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=172 end=211
+[stderr] start=610 end=670","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+4e515707b66d,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+Data collation size mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+default_data_collator / torch_default_data_collator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The training loop attempted to fetch a batch, and when stacking features, samples had different sequence lengths (e.g., entries of size 8 and 7), causing a tensor size mismatch in torch.stack.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81964-81982] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+1c21ac91b9a9,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+16b9a317e04d,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+Blocks dataset construction in train script","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+Total tokens (63) are far fewer than the block size (131072), so grouping yields zero blocks. The resulting empty dataset causes RandomSampler to raise ValueError because num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1708
+[stdout] start=0 end=52","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+9f091cb2003d,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+c2fe820c99a2,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+index_out_of_bounds","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+graph edge_index at training iteration 81","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+At iteration 81 the graph has 4 nodes but max_edge=5, so an edge references node index 5, which is out of bounds for the node count. This causes deg_inv_sqrt indexing to fail in gcn_norm.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=2951 end=2988
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+9368626c5767,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+best model checkpoint handling in trainer.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempts to compare the current checkpoint with the best model checkpoint, but the best checkpoint path 'outputs/checkpoint-2' does not exist. This likely happens because the checkpoint was not saved (e.g., due to a condition that never saves checkpoint-2) or the best checkpoint tracking is misconfigured, leading to a FileNotFoundError during training.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+a0988606425b,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+b42ff9e3881b,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+data preprocessing / tokenization bug","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py dataset tokenizer or data generator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+An input token ID in the training batch exceeds the vocabulary size of the BERT model embedding layer (config vocab_size). The embedding lookup fails with an IndexError, causing the trainer to crash after many steps.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1789, 'grad_norm': 2.6926820278167725, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163360-163379] training-step=1190
+{'loss': 1.5834, 'grad_norm': 1.757123589515686, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=105 end=4680
+[stderr] start=4641 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c2aac35d782b,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+03917f1be513,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+914fb9f40b08,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor save error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight (attention module)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The training loop completed, but during model saving safetensors raised a ValueError because the query weight tensor is non-contiguous. This typically arises from code that slices or reshapes tensors without calling .contiguous(), leaving the underlying storage with non-contiguous strides.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d7ed7a83bc8e,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Non-contiguous tensor handling","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+cyan_bench_train.py model saving path / safetensors serialization","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+Training completed successfully, but the model saving step failed because a tensor is non-contiguous. The safetensors library rejects non-contiguous tensors. This indicates that during training or preprocessing, the model weights (specifically bert.encoder.layer.0.attention.self.query.weight) were modified in a way that created a non-contiguous memory layout (e.g., via slicing, transposing, or advanced indexing).","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=2600 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d64cc40dec3a,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty training dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+dataset preprocessing / block_size setting in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The dataset contains 63 source tokens, but with block_size=131072, grouping produces 0 blocks because the total tokens are far below the block size. Trainer's RandomSampler then receives an empty dataset and raises ValueError: num_samples should be a positive integer value.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1547 end=1584
+[stdout] start=0 end=52","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+fd8ab2f086d2,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+numerical instability","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+environment observation contains NaN","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The policy forward pass computes action logits as NaN because the observation tensor contains NaN values, likely due to an environment bug that corrupts the state. This leads to a Categorical distribution with invalid parameters and a ValueError.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=4007 end=4212","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5311bca675bf,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Non-contiguous tensor during model save","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model's parameter tensor is non-contiguous, likely due to a buggy attention modification that slices or holds out part of the weight matrix, leaving it non-contiguous. safetensors rejects saving such tensors, causing the exception during trainer.save_model.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+440492ae18f4,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+action_space_type_mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The action space is multidimensional (e.g., MultiDiscrete), causing action_dims to be a list of numpy arrays. Calling sum() on these arrays returns a numpy ndarray instead of an integer, which is passed to nn.Linear's out_features, leading to a TypeError in torch.empty().","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+f92121fa7c01,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+IndexError in embedding lookup","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+vocabulary size mismatch between tokenizer and model","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The input token IDs passed to the BERT model contain indices that exceed the size of the word embedding matrix, causing torch.embedding to raise an IndexError during forward pass.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1789, 'grad_norm': 2.6926820278167725, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163360-163379] training-step=1190
+{'loss': 1.5834, 'grad_norm': 1.757123589515686, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3584 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+469386f447d7,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Numerical instability causing NaN logits","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+PPO configuration with n_steps=1 and batch_size=2","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+With rollout buffer size 1, advantages normalization uses a degenerate standard deviation (zero or invalid degrees of freedom), producing NaN values that propagate through the policy update to the action distribution logits, causing a ValueError.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4233","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c427d3398bc5,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+TypeError in action network initialization","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py line 336, caused by environment action space providing numpy arrays instead of ints for action_dims","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+When building the PPO policy, proba_distribution_net computes the total output size for the linear action layer as sum(self.action_dims). If action_dims contains numpy arrays (e.g., from a MultiDiscrete or custom action space), sum returns a numpy array rather than an int, leading to a TypeError in torch.nn.Linear's size argument.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5d5c2451e68f,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing_checkpoint_file","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+outputs/checkpoint-2","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempts to compare the current checkpoint path with the best_model_checkpoint, but the path 'outputs/checkpoint-2' does not exist. This indicates the checkpoint was never saved, likely due to an incorrect output directory or missing directory creation, causing a FileNotFoundError.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1000 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+907ca0d04aa6,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Non-contiguous tensor serialization failure","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model's attention query weight tensor became non-contiguous (e.g., via slicing, indexing, or transpose operations without calling .contiguous()). When trainer.save_model attempts to serialize with safetensors, it rejects non-contiguous tensors, causing a ValueError and process exit with code 1.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=876 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+dbb8eb4b1f8b,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+14fd67458090,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+Observation shape mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+evaluation environment reset (cyan_bench environment) returning observation with inhomogeneous shape","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The evaluation environment's reset method returns an observation that is a tuple or list of arrays with unequal inner dimensions. When `obs_to_tensor` attempts to convert this observation to a numpy array using `np.array(observation)`, numpy raises a ValueError because the resulting array would have an inhomogeneous shape. This happens after training completes, during the final prediction call, causing the process to exit with code 1.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+81cdb8413c52,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+out-of-bounds index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+cyan_bench_train.py / graph data edge_index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index tensor contains a node index (5) that exceeds the number of nodes (4) in the graph. This violates the expected dimension size during GCN normalization, causing an IndexError in gcn_norm when indexing deg_inv_sqrt with row/col entries.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2113
+[stdout] start=0 end=2988","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+fb0b632bb362,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+data/tokenization","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+tokenizer/dataset producing out-of-vocabulary token IDs","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The forward pass in the BERT model attempts to embed input IDs, but one or more token IDs exceed the embedding matrix size, likely due to tokenizer/dataset mismatch (e.g., incorrect vocabulary mapping or missing special token handling), causing an IndexError in the embedding lookup after 1200 steps.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.2055, 'grad_norm': 2.1612141132354736, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163302-163321] training-step=1190
+{'loss': 1.6258, 'grad_norm': 1.6870911121368408, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+3855b32f3c50,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+FileNotFoundError from checkpoint comparison","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+transformers/trainer.py line 2697, os.path.samefile call with non-existent path 'outputs/checkpoint-2'","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempted to compare the current checkpoint with self.state.best_model_checkpoint during the training loop, but the best_model_checkpoint pointed to a path that was never saved (or was deleted), causing os.path.samefile to raise FileNotFoundError.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+24f7d43c1e29,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+Invalid edge index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+graph data or edge_index construction in gcn_norm","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index contains a node index (5) that exceeds the number of nodes (4) in the graph, causing deg_inv_sqrt indexing to fail during GCN normalization.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e909b786a80a,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+Empty training dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py (Blocks dataset grouping)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The tokenized corpus produced grouped_blocks=0, resulting in an empty training dataset. Trainer->get_train_dataloader attempts to create a RandomSampler with num_samples=0, which raises ValueError.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c04bc1a18d79,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+numerical instability","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+PPO hyperparameters (n_steps=1, n_envs=1, batch_size=2)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The rollout buffer has only one sample (n_steps * n_envs = 1), causing the advantage normalization to compute std on a single element (degrees of freedom <= 0) and yield NaN advantages. These NaNs propagate into policy evaluation, producing NaN action logits that violate the Categorical distribution constraint and raise a ValueError.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=950 end=4233
+[stderr] start=0 end=4233","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+b4bce46825d3,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Numerical instability due to single-sample training","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+Advantage normalization in PPO with batch size 1","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+With n_steps=1 and n_envs=1, the rollout buffer contains a single sample. In PPO's advantage normalization, dividing by the standard deviation (plus epsilon) when std is effectively zero leads to NaN values in the advantages and subsequently in the policy logits. This propagates to the Categorical distribution, causing the ValueError during action sampling.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3584 end=4233
+[stderr] start=1792 end=3840","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+65309ac8e4c0,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+15f53d1bd0b5,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+model saving failure due to non-contiguous tensor","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model's query weight tensor is not contiguous, likely due to a bug that slices or permutes the tensor without calling .contiguous(). Safetensors serialization requires contiguous tensors.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e8f1a837310e,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collation mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+default_data_collator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+Training batches contain sequences of varying lengths, and the default data collator does not pad them, causing torch.stack to fail when trying to create a batch tensor.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81955-81973] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858690977096558, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3382 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+95026d1c6a1a,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+IndexOutOfBounds","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+edge_index construction in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The graph's edge_index contains a node index (5) that exceeds the number of nodes (4), causing an IndexError when indexing deg_inv_sqrt during GCN normalization. The stdout logs show that most graphs have max_edge=3, but graph 81 reports max_edge=5, indicating malformed edge generation or validation.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+a4e7ec4c5f01,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collation mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+torch_default_data_collator / dataset tokenization without padding","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+Training failed during batch collation because input sequences have different lengths (8 vs 7) and the default collator attempts to stack them without padding, causing a RuntimeError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81955-81973] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858690977096558, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+cf14974582d8,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+214bdc03fb91,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+Data collation error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+data collator / dataset padding","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The default collator in transformers tries to stack tensors from samples into a batch, but variable-length sequences without padding cause shape mismatch (e.g., [8] vs [7]) leading to a RuntimeError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81950-81968] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+789d403171b4,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collator mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+transformers/data/data_collator.py line 155 in torch_default_data_collator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The dataset yields features (e.g., input_ids) of different sequence lengths, and the default data collator does not pad them to equal length, causing torch.stack() to fail with a size mismatch.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81964-81982] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+955372f1784e,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+a2c06bea86fd,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+checkpoint saving strategy or best model loading logic","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The training loop completed but the trainer attempted to compare the best model checkpoint via os.path.samefile, which requires the checkpoint directory to exist. The path 'outputs/checkpoint-2' was never created, likely because checkpoint saving was disabled or misconfigured, leading to FileNotFoundError at the end of training.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3 end=13","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e0ebe88e0755,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+TypeError in action distribution dimensions","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py, proba_distribution_net (action_dims not converted to ints)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The action distribution's `action_dims` list contains numpy arrays instead of plain integers. When `sum(self.action_dims)` is computed, it returns a numpy array (or a scalar with array elements), which is then passed to `nn.Linear(latent_dim, ...)`. PyTorch's `Linear` expects a tuple of ints for its size argument, so the numpy element causes a TypeError during model initialization, crashing the training process.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2233
+[stderr] start=0 end=2048","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d8adf6c7da7e,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collation error due to unequal sequence lengths","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+transformers.data.data_collator.default_data_collator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The training process crashed when the default data collator attempted to stack a batch of tensors with differing shapes (e.g., [8] vs [7]) because the dataset contains sequences of variable length and no padding or truncation is applied during collation, leading to a RuntimeError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81964-81982] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+bddad5e39c68,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+54dbf73f03be,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+environment_observation_shape_mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py: evaluation environment reset result (lacks proper VecEnv wrapper)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+After training, the evaluation environment's reset() returns an observation that is not a single contiguous array (e.g., a tuple or list of arrays with differing shapes). This causes np.array(observation) inside obs_to_tensor() to raise a ValueError when predict() attempts to convert the observation into a tensor, because the inhomogeneous shape cannot form a valid numpy array.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+f11b31e99735,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+API mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py line 50: model.predict(evaluation.reset(), deterministic=True)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The environment's reset() returns a tuple (observation, info) in the Gymnasium API, but SB3's predict() expects a single observation array. Passing the tuple causes np.array(observation) to fail with a ValueError due to inhomogeneous shape.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+a92191f553d1,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Invalid hyperparameter configuration","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+n_steps=1 and n_envs=1 with batch_size=2 in PPO training","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The rollout buffer size is 1 (n_steps * n_envs = 1), but the mini-batch size is 2, causing a truncated mini-batch. More critically, with only one sample, the advantage normalization in PPO computes std() with zero degrees of freedom, yielding NaN advantages that propagate to NaN logits in the policy network, ultimately crashing when constructing the Categorical distribution.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1
+[stderr] start=2 end=3
+[stderr] start=4 end=5","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+026f0dc582ff,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+IndexError in embedding layer due to out-of-range token ID","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+Tokenizer and model vocab_size mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The tokenizer produces token IDs larger than the model's embedding matrix size because the model config's vocab_size is smaller than the tokenizer's vocabulary length, causing the embedding lookup to fail.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1967, 'grad_norm': 2.300987958908081, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163334-163353] training-step=1190
+{'loss': 1.6113, 'grad_norm': 1.893932580947876, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3584 end=4680
+[stderr] start=1792 end=3840","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c544a0261a07,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+out-of-bounds edge index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+edge_index in graph data","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index contains node indices (e.g., 5) that exceed the number of nodes (4), leading to an IndexError when indexing deg_inv_sqrt during GCN normalization.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+632776932be1,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+Multi-dimensional action distribution construction","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+stable_baselines3/common/distributions.py in proba_distribution_net (line 336) using sum(self.action_dims) when action_dims contains numpy arrays","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+The action space is multidimensional (e.g., MultiDiscrete or Box with multiple dimensions), so self.action_dims is built as a numpy array or a list of numpy arrays. Calling sum() on such a structure performs element-wise addition, yielding a numpy array instead of an integer scalar. This array is then passed to nn.Linear as out_features, causing torch.empty() to raise a TypeError because the size argument must be a tuple of integers.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2233","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+c8143a8c1a90,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint file","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+outputs/checkpoint-2","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The Trainer's inner training loop attempted to compare the current checkpoint with the best model checkpoint via os.path.samefile, but the referenced path 'outputs/checkpoint-2' does not exist. This likely occurs because the training script either references a checkpoint that was never saved, or the checkpointing configuration (e.g., save_steps, load_best_model_at_end) creates a mismatch between expected and actual checkpoint paths.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e79eb9a42443,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+index_out_of_range","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+tokenizer/embedding vocabulary mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+The tokenizer produced token IDs that exceed the model's embedding vocabulary size, causing an IndexError in torch.embedding during the forward pass.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.2055, 'grad_norm': 2.1612141132354736, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163302-163321] training-step=1190
+{'loss': 1.6258, 'grad_norm': 1.6870911121368408, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=105 end=4680
+[stderr] start=4641 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+6b007ecff331,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+NaN logits from advantage normalization","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+PPO advantage normalization in stable_baselines3/ppo/ppo.py line 210","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+With n_steps=1 and n_envs=1, the rollout buffer contains only one sample. Advantage normalization over a single element causes std() to be zero, and dividing by (0+1e-8) produces NaN. The NaN advantages propagate to the policy logits, causing the Categorical distribution to be instantiated with NaN values, raising a ValueError.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=189 end=310
+[stderr] start=385 end=4233","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+159dd2846df1,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+Data collation failure","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+default_data_collator","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The data collator attempts to stack tensors of unequal lengths (8 vs 7), which indicates that tokenization did not pad sequences to a common length. This likely occurs because the tokenizer's padding is disabled or the collator does not handle variable-length inputs.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81950-81968] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+cf73ad237f36,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The training loop completed successfully, but the subsequent model save failed because safetensors cannot serialize a non-contiguous tensor. The tensor `bert.encoder.layer.0.attention.self.query.weight` is not contiguous, likely due to a bug in the attention implementation that creates a view or transpose of a parameter without calling `.contiguous()`. This causes the ValueError during `save_pretrained`.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+d5c296000e8a,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+block_size=131072 exceeds total tokens","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The training script groups source tokens into blocks of size 131072. With only 63 tokens available, no complete block can be formed, resulting in an empty dataset. The Trainer then fails when creating a RandomSampler because the dataset size is zero.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=1
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5a6c636ec291,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+Invalid hyperparameter configuration","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+`batch_size` in PPO is 2 but rollout buffer size is 1 (n_steps=1, n_envs=1)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The rollout buffer only contains 1 sample per rollout, while mini-batch size is 2. This creates a truncated mini-batch of size 1 during training updates, causing numerical instability in the policy network that results in NaN logits and a crash.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4233
+[stdout] start=0 end=313","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+1b0aaa1bb352,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data collation error","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+cyan_bench_train.py / data preprocessing (missing padding)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+Variable-length sequences in the batch cause torch.stack to fail because the default data collator does not pad; sequences of lengths 8 and 7 are stacked, triggering a RuntimeError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81964-81982] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+48d7d3f6cdd9,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+33dd2e52e1c5,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py (dataset construction with block_size=131072)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The tokenized corpus had only 63 tokens, and with block_size=131072 no complete block could be formed, yielding an empty dataset which RandomSampler rejects because num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1708
+[stdout] start=0 end=52","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5ae1b99ef4fc,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+numerical instability","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+cyan_bench_train.py PPO configuration (n_steps=1, n_envs=1, batch_size=2)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The training run uses a rollout buffer of size n_steps * n_envs = 1, but the mini-batch size is 2, leading to truncated mini-batches. Additionally, with a single sample, advantage normalization triggers a std() computation with zero degrees of freedom, making advantages NaN. This propagates to the policy forward pass, producing NaN logits and crashing the Categorical distribution initialization.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4233
+[stdout] start=0 end=313","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+95b84cee6025,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint file","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+training script configuration in cyan_bench_train.py (checkpoint saving logic)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempts to compare the current checkpoint with the best model checkpoint at 'outputs/checkpoint-2', but that path does not exist. This indicates that the best model checkpoint was never saved or was deleted during training, likely due to an incorrect save strategy (e.g., save_strategy='no' or metric-based saving misconfig) or a script bug that removes checkpoints.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1100 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+1775f704460c,case_005,mid_run | stable-baselines3 | optimizer-numerics,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+numerics
+
+▶ CANDIDATE:
+NaN logits in policy forward","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- n_steps
+- advantage normalization
+- effective batch size one
+
+▶ CANDIDATE:
+Policy forward pass with batch size 1 (n_steps=1, n_envs=1) yields NaN logits","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- single-sample standard deviation is undefined
+- NaN update corrupts policy parameters
+
+▶ CANDIDATE:
+The configuration uses n_steps=1 and n_envs=1, so the rollout buffer contains only one sample per rollout. During the forward pass, the policy network (likely with normalization layers) receives a batch of size 1, which causes the latent outputs (mean_actions) to become NaN, leading to a ValueError when constructing the Categorical distribution with NaN logits.","REQUIRED GROUP 1:
+[stderr bytes 4007-4044] ValueError: Expected parameter logits (Tensor of shape (1, 2)) of distribution Categorical(logits: torch.Size([1, 2])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+REQUIRED GROUP 2:
+[stderr bytes 3932-3961]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/sb3-2-1/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py"", line 77, in __init__","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3584 end=4233","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+8a382fe2422a,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+API misuse","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py:50","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+The evaluation environment's reset() returns a (observation, info) tuple per Gymnasium API, but the script passes the entire tuple to model.predict(), which expects a single observation array. np.array() then fails to create a homogeneous array, raising ValueError.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+23152983c1ea,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+Non-contiguous tensor during model save","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model contains a parameter tensor that is non-contiguous, likely due to operations such as slicing or transposing during training or modification, and safetensors requires contiguous tensors for saving, causing the save_model call to raise ValueError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+8def25840cad,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+embedding index out of range","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+tokenizer/data preparation","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+Input token IDs exceed the embedding matrix size, causing an IndexError during word_embeddings lookup.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.1967, 'grad_norm': 2.300987958908081, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163334-163353] training-step=1190
+{'loss': 1.6113, 'grad_norm': 1.893932580947876, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+2a0809c2368c,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+109a73219bbe,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+checkpoint file not found","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+The trainer attempted to compare the current checkpoint with the best model checkpoint after training, but the file 'outputs/checkpoint-2' was missing. This likely results from a mismatch between the checkpoint save directory and the path provided to the trainer, causing a FileNotFoundError.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=840 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+202b631d9ede,case_011,mid_run | pytorch-geometric | graph-data-integrity,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+graph-data-integrity
+
+▶ CANDIDATE:
+invalid edge_index","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge_index
+- removed node
+- node feature matrix
+
+▶ CANDIDATE:
+training graph construction (edge_index contains node index out of range)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- edge index references a non-existing node
+- message passing indexes beyond x rows
+
+▶ CANDIDATE:
+The edge_index tensor for the graph at iteration 81 contains a node index (5) that exceeds the number of nodes (4), causing an IndexError during degree normalization in gcn_norm.","REQUIRED GROUP 1:
+[stdout bytes 657-673] training-graph=19 nodes=4 max_edge=3
+REQUIRED GROUP 2:
+[stdout bytes 2951-2987] training-graph=81 nodes=4 max_edge=5
+REQUIRED GROUP 3:
+[stderr bytes 2048-2112] IndexError: index 5 is out of bounds for dimension 0 with size 4","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2113","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+7cefedc8bb56,case_003,startup | stable-baselines3 | environment-space-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment
+
+▶ CANDIDATE:
+multidimensional action space bug","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- MultiDiscrete
+- nvec
+- action space
+
+▶ CANDIDATE:
+sum(self.action_dims) in stable_baselines3/common/distributions.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- policy assumes one-dimensional action dimensions
+- nested nvec reaches linear layer construction
+
+▶ CANDIDATE:
+When the action space is multidimensional, action_dims contains numpy arrays, and summing them yields a numpy array instead of an integer, which is passed as the output size to nn.Linear, causing a TypeError.","REQUIRED GROUP 1:
+[stderr bytes 2112-2223] TypeError: empty(): argument 'size' (position 1) must be tuple of ints, but found element of type numpy.ndarray at pos 0
+REQUIRED GROUP 2:
+[stderr bytes 1793-1837]     action_logits = nn.Linear(latent_dim, sum(self.action_dims))","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1566 end=1773","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+7805cd9074b9,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+fa8e31d01687,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty training dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+dataset preprocessing in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The total number of source tokens (63) is less than the configured block size (131072), so grouping produces zero blocks (grouped_blocks=0). The resulting empty dataset is passed to the Trainer, which fails when creating a RandomSampler because num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+a213d5181f3b,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+no patch",,,,,,,,[parser note: status=schema_error]
+fdd7610f1469,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data_collation","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The dataset produces samples with varying sequence lengths for the same feature, causing torch.stack in the default data collator to fail when collating a batch.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81950-81968] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=270 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+6a2780e9cc90,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor during model save","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight (model weight tensor)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The training script modifies the model weights (likely via slicing or view operations) producing a non-contiguous tensor for the query weight. When `trainer.save_model` attempts to serialize the model with safetensors, it rejects non-contiguous tensors, raising a ValueError and causing the process to exit with code 1.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=2690 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+96d857ad2acf,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+5c2933c2e4cb,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+d8e6f2093bc3,case_006,control | transformers-trainer | long_clean,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+c862be6ba8e5,case_002,finalization | transformers-trainer | checkpoint-state-machine,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+missing checkpoint path","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best_model_checkpoint
+- save_steps
+- eval_steps
+
+▶ CANDIDATE:
+self.state.best_model_checkpoint points to 'outputs/checkpoint-2' which does not exist","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- best metric points to an unsaved checkpoint
+- checkpoint rotation calls samefile on missing path
+
+▶ CANDIDATE:
+During the inner training loop, the trainer attempts to compare the current checkpoint with the best model checkpoint using os.path.samefile. Since the checkpoint directory 'outputs/checkpoint-2' was not created (likely due to misconfigured checkpoint saving or the path being computed incorrectly), the call raises FileNotFoundError, causing the process to terminate with returncode 1.","REQUIRED GROUP 1:
+[stderr bytes 1050-1127] FileNotFoundError: [Errno 2] No such file or directory: 'outputs/checkpoint-2'
+REQUIRED GROUP 2:
+[stderr bytes 859-921]     if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1129","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+5224046ee2f4,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+Blocks dataset creation in cyan_bench_train.py","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The dataset contains only 63 tokens, which is far fewer than the specified block_size of 131072, so no blocks can be formed. This produces an empty train_dataset, and the Trainer's RandomSampler rejects it with num_samples=0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+e775c9ba464d,case_004,finalization | transformers-trainer | checkpoint-serialization,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+checkpoint
+
+▶ CANDIDATE:
+non-contiguous tensor saving","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safe serialization
+- non-contiguous attention parameter
+- attention.self.query.weight
+
+▶ CANDIDATE:
+bert.encoder.layer.0.attention.self.query.weight","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- safetensors requires contiguous tensor storage
+- transpose creates non-contiguous storage
+
+▶ CANDIDATE:
+The model contains a tensor that is a view/slice of another tensor, making it non-contiguous, and safetensors rejects saving it. This causes the training script to crash during save_model step.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 0.6928, 'learning_rate': 4.99375e-05, 'epoch': 0.5}
+REQUIRED GROUP 2:
+[stdout bytes 67040-67067] training-main-loop-complete
+REQUIRED GROUP 3:
+[stderr bytes 2330-2388] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.
+REQUIRED GROUP 4:
+[stderr bytes 2412-2439] ValueError: You are trying to save a non contiguous tensor: `bert.encoder.layer.0.attention.self.query.weight` which is not allowed. It either means you are trying to save tensors which are reference of each other in which case it's recommended to save only the full tensors, and reslice at load time, or simply call `.contiguous()` on your tensor to pack it before saving.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=1792 end=2704","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+1365e3e8e1ce,case_009,mid_run | transformers-trainer | tokenizer-model-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+shape
+
+▶ CANDIDATE:
+IndexError in embedding layer","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- resize_token_embeddings
+- late special token
+- embedding matrix
+
+▶ CANDIDATE:
+Tokenizer or data collator producing token IDs exceeding model vocab_size","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- late token id exceeds embedding rows
+- tokenizer and model vocabulary mismatch
+
+▶ CANDIDATE:
+An input token ID is outside the range of the model's word_embeddings weight matrix, likely due to a mismatch between the tokenizer's vocabulary and the model's config vocab_size. The training loop processed many batches until a batch contained an out-of-range token ID, causing torch.embedding to raise an IndexError.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 2.2055, 'grad_norm': 2.1612141132354736, 'learning_rate': 5e-05, 'epoch': 0.0008326394671107411}
+REQUIRED GROUP 2:
+[stdout bytes 163302-163321] training-step=1190
+{'loss': 1.6258, 'grad_norm': 1.6870911121368408, 'learning_rate': 4.995836802664446e-07, 'epoch': 0.9908409658617818}
+REQUIRED GROUP 3:
+[stderr bytes 4641-4679] IndexError: index out of range in self
+REQUIRED GROUP 4:
+[stderr bytes 4435-4474]   File ""/Users/lofi/Downloads/Zgent/benchmarks/envs/hf-4-53/.venv/lib/python3.12/site-packages/torch/nn/functional.py"", line 2551, in embedding","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3584 end=4680","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+6dce1d2a2645,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+1206b38b80ab,case_010,finalization | stable-baselines3 | environment-api-contract,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+environment-api
+
+▶ CANDIDATE:
+incorrect reset handling","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- Gymnasium reset return
+- model.predict
+- observation tuple
+
+▶ CANDIDATE:
+cyan_bench_train.py line 50: model.predict(evaluation.reset(), deterministic=True)","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- reset returns (observation, info)
+- predict expects only the observation array
+
+▶ CANDIDATE:
+Gym's env.reset() returns a tuple (observation, info) as of Gym v0.26, but the code passes the entire tuple to model.predict() which expects only the observation. np.array(tuple) fails with a ValueError because the two elements (obs and info) have incompatible shapes, producing an inhomogeneous array.","REQUIRED GROUP 1:
+[stdout bytes 3038-3065] training-main-loop-complete
+REQUIRED GROUP 2:
+[stderr bytes 1166-1266] ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (2,) + inhomogeneous part.","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=0 end=1337","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+109ac80016b3,case_002,control | transformers-trainer | warning_heavy,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,
+33b6ae0e7f3f,case_001,mid_run | transformers-trainer | language-model-collation,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+data-collation
+
+▶ CANDIDATE:
+data shape mismatch","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- group_tokens
+- short final block
+- default data collator
+
+▶ CANDIDATE:
+data collator / dataset padding","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- remainder shorter than block size is retained
+- torch.stack receives unequal sequence lengths
+
+▶ CANDIDATE:
+The data collator attempted to stack tensors of different lengths (8 and 7) because the dataset contains sequences with different lengths and no padding was applied, causing a RuntimeError that terminated training.","REQUIRED GROUP 1:
+[stdout bytes 0-16] training-step=1
+{'loss': 3.4709, 'grad_norm': 1.5283594131469727, 'learning_rate': 5e-05, 'epoch': 0.0016611295681063123}
+REQUIRED GROUP 2:
+[stdout bytes 81950-81968] training-step=599
+{'loss': 3.2028, 'grad_norm': 1.1858689785003662, 'learning_rate': 3.3222591362126246e-07, 'epoch': 0.9950166112956811}
+REQUIRED GROUP 3:
+[stderr bytes 3282-3338] RuntimeError: stack expects each tensor to be equal size, but got [8] at entry 0 and [7] at entry 1
+REQUIRED GROUP 4:
+[stderr bytes 3191-3228]     batch[k] = torch.stack([f[k] for f in features])","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stderr] start=3000 end=3382","▶ GOLD:
+should patch
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+f91258af3385,case_007,startup | transformers-trainer | language-model-dataset-construction,"▶ GOLD:
+fault
+
+▶ CANDIDATE:
+fault","▶ GOLD:
+dataset-construction
+
+▶ CANDIDATE:
+empty dataset","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block_size
+- group_tokens
+- empty train dataset
+
+▶ CANDIDATE:
+cyan_bench_train.py dataset grouping logic","▶ GOLD:
+ACCEPTABLE ALTERNATIVES — 任一等价表达即可：
+- block size exceeds total corpus tokens
+- remainder truncation removes every sample
+
+▶ CANDIDATE:
+The script groups source tokens into blocks of size 131072, but only 63 tokens are available, resulting in 0 blocks and an empty train dataset. The Trainer then attempts to create a RandomSampler on an empty dataset, raising a ValueError because num_samples is 0.","REQUIRED GROUP 1:
+[stdout bytes 0-51] source_tokens=63 grouped_blocks=0 block_size=131072
+REQUIRED GROUP 2:
+[stderr bytes 1638-1707] ValueError: num_samples should be a positive integer value, but got num_samples=0","FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+[stdout] start=0 end=52
+[stderr] start=0 end=1708","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+patch recommended",,,,,,,,
+259be35e3f00,case_008,control | transformers-trainer | short_quiet,"▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+no_fault","▶ GOLD:
+no_fault
+
+▶ CANDIDATE:
+","▶ GOLD:
+
+
+▶ CANDIDATE:
+","▶ GOLD:
+normal run, no fault injected
+
+▶ CANDIDATE:
+",Control run exited 0; no failure evidence is expected.,"FORMAL-V1 NOTE: offset unit was unspecified; score semantic support only.
+(no reference submitted)","▶ GOLD:
+should abstain
+
+▶ CANDIDATE:
+no patch",,,,,,,,

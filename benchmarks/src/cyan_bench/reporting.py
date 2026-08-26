@@ -209,6 +209,7 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
                 "baseline": diagnosis.baseline,
                 "repeat": diagnosis.repeat,
                 "status": diagnosis.status,
+                "prompt_version": diagnosis.prompt_version,
                 "split": case.manifest.split,
                 "failure_stage": case.manifest.failure_stage if variant == "buggy" else None,
                 "framework": case.manifest.framework,
@@ -293,6 +294,9 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
                 "patchable": case.manifest.patchable,
             }
         )
+    incident_prompt_versions = sorted(
+        {str(item["prompt_version"]) for item in incident_records}
+    )
     valid_incidents = [item for item in incident_records if item["error"] is None]
     incident_test = [
         item
@@ -331,6 +335,18 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
             "temperature": DIAGNOSIS_TEMPERATURE,
             "reasoning_effort": DIAGNOSIS_REASONING_EFFORT,
             "max_output_tokens": DIAGNOSIS_MAX_OUTPUT_TOKENS,
+            "prompt_version": (
+                sorted({str(item["prompt_version"]) for item in diagnosis_records})[0]
+                if len({str(item["prompt_version"]) for item in diagnosis_records}) == 1
+                else "mixed"
+            ),
+        },
+        "incident_protocol": {
+            "prompt_version": (
+                incident_prompt_versions[0]
+                if len(incident_prompt_versions) == 1
+                else "mixed"
+            ),
         },
         "selection_records": selection_records,
         "selection_test_macro_by_baseline": selection_by_baseline,
@@ -374,26 +390,63 @@ def build_report(run_set: str, paths: BenchmarkPaths) -> dict[str, object]:
             "resolved_rate": _macro(incident_test, "resolved"),
             "proposal_valid_rate": _macro(incident_test, "proposal_valid"),
             "unsafe_proposal_rate": _macro(incident_test, "unsafe_proposal"),
+            "correct_patch_abstention_rate": _macro(
+                incident_test, "correct_patch_abstention"
+            ),
+            "missed_patch_opportunity_rate": _macro(
+                incident_test, "missed_patch_opportunity"
+            ),
+            "abstention_gate_violated_rate": _macro(
+                incident_test, "abstention_gate_violated"
+            ),
         },
         "incident_test_by_failure_stage": _by_dimension(
             incident_test,
             "failure_stage",
-            ("resolved", "proposal_valid", "unsafe_proposal"),
+            (
+                "resolved",
+                "proposal_valid",
+                "unsafe_proposal",
+                "correct_patch_abstention",
+                "missed_patch_opportunity",
+                "abstention_gate_violated",
+            ),
         ),
         "incident_test_by_framework": _by_dimension(
             incident_test,
             "framework",
-            ("resolved", "proposal_valid", "unsafe_proposal"),
+            (
+                "resolved",
+                "proposal_valid",
+                "unsafe_proposal",
+                "correct_patch_abstention",
+                "missed_patch_opportunity",
+                "abstention_gate_violated",
+            ),
         ),
         "incident_test_by_fault_family": _by_dimension(
             incident_test,
             "fault_family",
-            ("resolved", "proposal_valid", "unsafe_proposal"),
+            (
+                "resolved",
+                "proposal_valid",
+                "unsafe_proposal",
+                "correct_patch_abstention",
+                "missed_patch_opportunity",
+                "abstention_gate_violated",
+            ),
         ),
         "incident_test_by_log_length": _by_dimension(
             incident_test,
             "log_length_bucket",
-            ("resolved", "proposal_valid", "unsafe_proposal"),
+            (
+                "resolved",
+                "proposal_valid",
+                "unsafe_proposal",
+                "correct_patch_abstention",
+                "missed_patch_opportunity",
+                "abstention_gate_violated",
+            ),
         ),
         "usage": {
             "diagnosis_all": _usage_summary(diagnosis_records),
@@ -432,6 +485,9 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
         f"# Cyan Incident Benchmark — {run_set}",
         "",
         "主表仅包含冻结 test；没有加权总分。",
+        "",
+        f"Diagnosis prompt: `{report['diagnosis_protocol']['prompt_version']}`; "
+        f"Incident prompt: `{report['incident_protocol']['prompt_version']}`。",
         "",
         "## Retrieval macro (frozen test)",
         "",
@@ -477,7 +533,14 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             "|---|---:|---:|",
         ]
     )
-    for metric in ("resolved_rate", "proposal_valid_rate", "unsafe_proposal_rate"):
+    for metric in (
+        "resolved_rate",
+        "proposal_valid_rate",
+        "unsafe_proposal_rate",
+        "correct_patch_abstention_rate",
+        "missed_patch_opportunity_rate",
+        "abstention_gate_violated_rate",
+    ):
         values = incident[metric]
         assert isinstance(values, dict)
         lines.append(
@@ -488,8 +551,9 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             "",
             "### Incident results by failure stage",
             "",
-            "| Stage | Cases | Resolved | Proposal valid | Unsafe proposal |",
-            "|---|---:|---:|---:|---:|",
+            "| Stage | Cases | Resolved | Proposal valid | Unsafe proposal | "
+            "Correct abstention | Missed opportunity | Gate violated |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     incident_stages = report["incident_test_by_failure_stage"]
@@ -500,7 +564,10 @@ def write_report(run_set: str, paths: BenchmarkPaths) -> tuple[Path, Path]:
             f"| {stage} | {baseline['resolved']['cases']} | "
             f"{baseline['resolved']['macro_mean']} | "
             f"{baseline['proposal_valid']['macro_mean']} | "
-            f"{baseline['unsafe_proposal']['macro_mean']} |"
+            f"{baseline['unsafe_proposal']['macro_mean']} | "
+            f"{baseline['correct_patch_abstention']['macro_mean']} | "
+            f"{baseline['missed_patch_opportunity']['macro_mean']} | "
+            f"{baseline['abstention_gate_violated']['macro_mean']} |"
         )
     lines.extend(
         [

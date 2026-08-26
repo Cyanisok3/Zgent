@@ -75,6 +75,9 @@ def test_incident_context_contains_only_bounded_inputs(tmp_path: Path) -> None:
     assert "Current instruction:\ninspect" in context.system_prompt
     assert '"summary": "previous"' in context.system_prompt
     assert "session" not in context.system_prompt.lower()
+    assert "causal_support=direct or inferred" in context.system_prompt
+    assert "Inference — not directly established by observed evidence:" in context.system_prompt
+    assert "patch_recommended=true" in context.system_prompt
     assert MAX_INPUT_BYTES == 128 * 1024
     assert MAX_INITIAL_EVIDENCE_BYTES == 32 * 1024
 
@@ -119,6 +122,8 @@ async def test_incident_profile_rejects_unobserved_workspace_reference(
                 }
             ],
             "confidence": 0.5,
+            "causal_support": "inferred",
+            "patch_recommended": False,
         }
     )
 

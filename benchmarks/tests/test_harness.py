@@ -13,8 +13,13 @@ from cyan_bench.admission import admit_case
 from cyan_bench.baselines import select_baseline
 from cyan_bench.cases import case_fingerprint, discover_cases, load_case, resolve_anchors
 from cyan_bench.cli import _incident_complete, _parser
+from cyan_bench.diagnosis import DIAGNOSIS_PROMPT_VERSION
 from cyan_bench.execution import discard_workspace, prepare_workspace
-from cyan_bench.incident_track import _wait_verification, run_incident_track
+from cyan_bench.incident_track import (
+    _diagnosis_summary,
+    _wait_verification,
+    run_incident_track,
+)
 from cyan_bench.models import IncidentBenchmarkArtifact, ProcessCapture
 from cyan_bench.paths import BenchmarkPaths, benchmark_paths
 from cyan_bench.reporting import build_report
@@ -154,6 +159,27 @@ def test_admission_uses_real_git_and_processes(tmp_path: Path) -> None:
     assert buggy.returncode != 0
     assert (paths.artifacts / "captures/fixture-fault/buggy/1/gold-ranges.json").is_file()
     assert not any((paths.artifacts / "workspaces").iterdir())
+
+
+# 功能：验证 Incident artifact 只保存有限诊断摘要和证据引用
+# 设计：传入多余文本与错误引用类型，确认摘要不携带工具输出或未定义字段
+def test_incident_diagnosis_summary_is_bounded() -> None:
+    summary = _diagnosis_summary(
+        {
+            "category": "dtype",
+            "root_cause": "direct cause",
+            "causal_support": "direct",
+            "patch_recommended": True,
+            "evidence": [
+                {"source": "stderr", "reference": "bytes:1-2", "description": "large"},
+                {"source": "stderr", "reference": 3},
+            ],
+        }
+    )
+
+    assert summary[:4] == ("dtype", "direct cause", "direct", True)
+    assert summary[4] == [{"source": "stderr", "reference": "bytes:1-2"}]
+    assert DIAGNOSIS_PROMPT_VERSION == "causal-support-abstention-v1"
 
 
 # 功能：验证 Tail、BM25 与 Cyan Selector 均产生可回溯且有界的 evidence

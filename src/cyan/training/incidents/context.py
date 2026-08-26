@@ -9,6 +9,7 @@ from cyan.training.incidents.selector import EvidenceSelection
 
 MAX_INPUT_BYTES = 128 * 1024
 MAX_INITIAL_EVIDENCE_BYTES = 32 * 1024
+INCIDENT_PROMPT_VERSION = "causal-support-abstention-v1"
 
 
 @dataclass
@@ -38,9 +39,18 @@ def build_incident_context(
         "You are cyan's read-only Incident Agent for a crashed local ML training process.\n"
         "This is incident response, not metric optimization or experiment research.\n"
         "Inspect only the bound workspace and immutable logs. Never run commands or modify "
-        "the workspace. Use read-only tools to verify causal evidence, call "
-        "submit_diagnosis exactly once when enough evidence exists, and propose at most one "
-        "exact single-file SEARCH/REPLACE only when it directly fixes the observed crash. "
+        "the workspace. Use read-only tools to verify causal evidence, then call "
+        "submit_diagnosis exactly once. The diagnosis must include causal_support="
+        "direct or inferred and patch_recommended=true or false.\n"
+        "When causal_support is direct, root_cause must trace to the earliest evidence-backed "
+        "upstream configuration, data contract, component, or producer, not only the traceback "
+        "leaf. When support is inferred, root_cause must begin with "
+        "'Inference — not directly established by observed evidence:' and must not invent an "
+        "unobserved file, setting, variable, or dependency version.\n"
+        "Set patch_recommended=true only for a user-workspace cause fixable by one exact "
+        "replacement in one existing file and verifiable by rerunning the original command. "
+        "For external data, environment or framework limitations, dependency changes, "
+        "multi-file fixes, or insufficient evidence, set it false and stop after diagnosis. "
         "A diagnosis without a patch is valid. Evidence must cite observed references.\n\n"
         f"Failure capsule:\n{capsule.model_dump_json(indent=2)}\n\n"
         f"Selected evidence:\n{selection.content}\n\n"
