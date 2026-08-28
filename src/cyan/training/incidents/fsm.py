@@ -26,6 +26,7 @@ class Event(StrEnum):
     APPLY_FAILED = "APPLY_FAILED"
     SMOKE_PASSED = "SMOKE_PASSED"
     SMOKE_FAILED_ROLLED_BACK = "SMOKE_FAILED_ROLLED_BACK"
+    SMOKE_FAILED_ROLLED_BACK_NO_EVIDENCE = "SMOKE_FAILED_ROLLED_BACK_NO_EVIDENCE"
     SMOKE_FAILED_ROLLBACK_BLOCKED = "SMOKE_FAILED_ROLLBACK_BLOCKED"
     RETRY_STARTED = "RETRY_STARTED"
     RETRY_SUCCEEDED = "RETRY_SUCCEEDED"
@@ -60,11 +61,13 @@ TRANSITIONS: dict[IncidentStatus, dict[Event, IncidentStatus]] = {
         Event.APPLY_OK_NO_SMOKE: "smoke_skipped",
         Event.APPLY_FAILED: "stale",
         Event.SMOKE_FAILED_ROLLED_BACK: "diagnosing",
+        Event.SMOKE_FAILED_ROLLED_BACK_NO_EVIDENCE: "unresolved",
         Event.SMOKE_FAILED_ROLLBACK_BLOCKED: "rollback_blocked",
     },
     "smoke_running": {
         Event.SMOKE_PASSED: "smoke_passed",
         Event.SMOKE_FAILED_ROLLED_BACK: "diagnosing",
+        Event.SMOKE_FAILED_ROLLED_BACK_NO_EVIDENCE: "unresolved",
         Event.SMOKE_FAILED_ROLLBACK_BLOCKED: "rollback_blocked",
     },
     "smoke_passed": {

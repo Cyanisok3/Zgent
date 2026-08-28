@@ -178,6 +178,39 @@ def _diagnosis_body(diagnosis: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+# 根据结构化诊断和当前状态生成确定性的修复处置说明
+def _diagnosis_disposition(
+    diagnosis: dict[str, Any], proposal: dict[str, Any], status: str
+) -> str:
+    support = str(diagnosis.get("causal_support") or "inferred")
+    recommended = bool(diagnosis.get("patch_recommended", False))
+    if support == "inferred":
+        return (
+            "Repair decision: automatic patch blocked because the causal support is inferred. "
+            "Use /incident to provide additional evidence."
+        )
+    if not recommended:
+        return (
+            "Repair decision: the cause is evidence-backed but outside cyan's safe "
+            "single-file repair boundary."
+        )
+    if proposal:
+        return "Repair decision: an evidence-backed single-file proposal is ready for approval."
+    if status == "diagnosing":
+        return "Repair decision: cyan is validating an evidence-backed single-file proposal."
+    return "Repair decision: no valid proposal was created; the diagnosis was retained."
+
+
+# 将持久化的 Incident 原因码翻译成用户可读的时间线提示
+def _incident_outcome_text(outcome: str) -> str:
+    if outcome == "smoke_evidence_unavailable":
+        return (
+            "Smoke failed and the patch was rolled back, but no Smoke output was available; "
+            "automatic re-diagnosis was skipped."
+        )
+    return outcome
+
+
 # 从 job.get 响应中读取指定字典字段
 def _dict_field(snapshot: dict[str, Any], name: str) -> dict[str, Any]:
     value = snapshot.get(name)
@@ -524,8 +557,10 @@ class CyanTuiApp(App[None]):
         self._active_run_id: str | None = None
         self._run_subscription_lock = asyncio.Lock()
         self._shown_diagnosis_id: str | None = None
+        self._shown_diagnosis_disposition: tuple[str, str, str, str] | None = None
         self._shown_proposal_id: str | None = None
         self._shown_smoke: str | None = None
+        self._shown_incident_outcome: str | None = None
         self._shown_incident_status: str | None = None
         self._seen_agent_events: set[tuple[str, str, str]] = set()
         self._agent_blocks: dict[str, Static] = {}
@@ -633,8 +668,10 @@ class CyanTuiApp(App[None]):
             self._incident_id = None
             self._proposal_id = None
             self._shown_diagnosis_id = None
+            self._shown_diagnosis_disposition = None
             self._shown_proposal_id = None
             self._shown_smoke = None
+            self._shown_incident_outcome = None
             self._shown_incident_status = None
             self._active_run_id = None
             self._pending_tool_blocks.clear()
@@ -963,6 +1000,24 @@ class CyanTuiApp(App[None]):
         if diagnosis and diagnosis_id != self._shown_diagnosis_id:
             self._shown_diagnosis_id = diagnosis_id
             self._append_diagnosis(diagnosis)
+
+        disposition_key = (
+            diagnosis_id,
+            str(proposal.get("id") or ""),
+            status,
+            str(incident.get("last_outcome") or ""),
+        )
+        if diagnosis and disposition_key != self._shown_diagnosis_disposition:
+            self._shown_diagnosis_disposition = disposition_key
+            self._append_text(
+                _diagnosis_disposition(diagnosis, proposal, status),
+                style="dim cyan",
+            )
+
+        outcome = str(incident.get("last_outcome") or "")
+        if outcome and outcome != self._shown_incident_outcome:
+            self._shown_incident_outcome = outcome
+            self._append_text(_incident_outcome_text(outcome), style="bold yellow")
 
         proposal_id = self._proposal_id or ""
         if proposal and proposal_id != self._shown_proposal_id:

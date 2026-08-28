@@ -50,6 +50,7 @@ export interface JobSnapshot {
     id: string;
     status: string;
     active_proposal_id?: string | null;
+    last_outcome?: string | null;
   } | null;
   diagnosis?: {
     id: string;
@@ -96,6 +97,27 @@ export interface StatusPresentation {
   icon: string;
 }
 
+// 根据诊断支持强度和 Proposal 状态生成确定性的修复处置说明
+export function diagnosisDisposition(snapshot: JobSnapshot): string {
+  const diagnosis = snapshot.diagnosis;
+  if (diagnosis === null || diagnosis === undefined) {
+    return "Diagnosis is not available yet.";
+  }
+  if (diagnosis.causal_support === "inferred") {
+    return "Automatic patch blocked because the causal support is inferred. Provide additional evidence via /incident.";
+  }
+  if (!diagnosis.patch_recommended) {
+    return "The cause is evidence-backed but outside cyan's safe single-file repair boundary.";
+  }
+  if (snapshot.proposal !== null && snapshot.proposal !== undefined) {
+    return "An evidence-backed single-file proposal is ready for approval.";
+  }
+  if (snapshot.incident?.status === "diagnosing") {
+    return "cyan is validating an evidence-backed single-file proposal.";
+  }
+  return "No valid proposal was created; the diagnosis was retained.";
+}
+
 const ACTIVE_JOBS = new Set(["starting", "running"]);
 
 // 判断快照中的真实训练进程是否仍在运行
@@ -137,7 +159,11 @@ export function statusPresentation(
 export function diagnosisMarkdown(snapshot: JobSnapshot): string {
   const diagnosis = snapshot.diagnosis;
   if (diagnosis === null || diagnosis === undefined) {
-    return "# cyan diagnosis\n\nDiagnosis is not available yet.\n";
+    const outcome = snapshot.incident?.last_outcome;
+    const note = outcome === "smoke_evidence_unavailable"
+      ? "Smoke failed and the patch was rolled back, but no Smoke output was available; automatic re-diagnosis was skipped."
+      : "Diagnosis is not available yet.";
+    return `# cyan diagnosis\n\n${note}\n`;
   }
   const evidence = diagnosis.evidence
     .map((item) => `- **${item.source}** — ${item.description}\n  - \`${item.reference}\``)
@@ -146,9 +172,9 @@ export function diagnosisMarkdown(snapshot: JobSnapshot): string {
     "# cyan diagnosis",
     "",
     `**Category:** ${diagnosis.category}`,
-    `**Confidence:** ${Math.round(diagnosis.confidence * 100)}%`,
     `**Causal support:** ${diagnosis.causal_support}`,
     `**Patch recommended:** ${diagnosis.patch_recommended ? "yes" : "no"}`,
+    `**Repair decision:** ${diagnosisDisposition(snapshot)}`,
     "",
     "## Summary",
     "",

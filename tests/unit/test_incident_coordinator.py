@@ -211,7 +211,12 @@ def _git(root: Path, *args: str) -> None:
 
 
 # 创建带真实 HEAD 和确定性失败脚本的临时 Git 工作区
-def _workspace(root: Path, *, smoke_exit: int | None = None) -> Path:
+def _workspace(
+    root: Path,
+    *,
+    smoke_exit: int | None = None,
+    smoke_output: bool = False,
+) -> Path:
     root.mkdir()
     (root / "train.py").write_text(
         'import sys\nprint("boom", file=sys.stderr)\nsys.exit(2)\n',
@@ -220,9 +225,15 @@ def _workspace(root: Path, *, smoke_exit: int | None = None) -> Path:
     if smoke_exit is not None:
         config = root / ".cyan" / "config.toml"
         config.parent.mkdir()
+        smoke_code = (
+            f"import sys; print('smoke failed', file=sys.stderr); "
+            f"raise SystemExit({smoke_exit})"
+            if smoke_output
+            else f"raise SystemExit({smoke_exit})"
+        )
         config.write_text(
             "[incident.smoke]\n"
-            f'argv = ["{sys.executable}", "-c", "raise SystemExit({smoke_exit})"]\n'
+            f'argv = ["{sys.executable}", "-c", {json.dumps(smoke_code)}]\n'
             "timeout_s = 5\n",
             encoding="utf-8",
         )
@@ -448,7 +459,7 @@ async def test_non_git_proposal_is_review_only(tmp_path: Path) -> None:
 # 功能：验证 smoke 失败会先回滚 proposal，不启动完整训练重跑
 # 设计：使用真实配置和真实 smoke 子进程，检查工作区恢复及 incident 重新诊断
 async def test_smoke_failure_rolls_back_before_retry(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path / "repo", smoke_exit=7)
+    workspace = _workspace(tmp_path / "repo", smoke_exit=7, smoke_output=True)
     original = (workspace / "train.py").read_text(encoding="utf-8")
     coordinator, supervisor, jobs = _system(workspace)
     try:
@@ -469,6 +480,51 @@ async def test_smoke_failure_rolls_back_before_retry(tmp_path: Path) -> None:
         assert (workspace / "train.py").read_text(encoding="utf-8") == original
         assert jobs.read_job(job.id).attempt_ids == ["attempt-0001"]
         assert second["smoke_result"]["status"] == "failed"
+        smoke_path = Path(second["smoke_result"]["stderr_path"])
+        assert smoke_path.exists()
+        assert "smoke failed" in smoke_path.read_text(encoding="utf-8")
+        run_paths = sorted(
+            (jobs.job_dir(job.id) / "incidents" / str(incident["id"]) / "runs").glob(
+                "*/run.json"
+            )
+        )
+        smoke_runs = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in run_paths
+        ]
+        smoke_run = next(item for item in smoke_runs if item["trigger"] == "smoke_failed")
+        assert any(item["kind"] == "smoke_tail" for item in smoke_run["selected_evidence"])
+    finally:
+        await coordinator.close()
+
+
+# 功能：验证 Smoke 没有输出时回滚后不自动启动新的 Incident Agent
+# 设计：使用真实空输出 Smoke，检查 unresolved 原因、零工作区写入和单次运行记录
+async def test_smoke_failure_without_output_stays_unresolved(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path / "repo", smoke_exit=7)
+    original = (workspace / "train.py").read_text(encoding="utf-8")
+    coordinator, supervisor, jobs = _system(workspace)
+    try:
+        job = await supervisor.start(
+            JobSpec(argv=[sys.executable, "train.py"], workspace_root=workspace)
+        )
+        await supervisor.wait(job.id)
+        awaiting = await _wait_incident(coordinator, job.id, "awaiting_approval")
+        incident_id = str(awaiting["incident"]["id"])
+        await coordinator.decide(
+            incident_id,
+            str(awaiting["proposal"]["id"]),
+            "approve",
+            run_smoke=True,
+            smoke_config_fingerprint=str(awaiting["smoke_config_fingerprint"]),
+        )
+        unresolved = await _wait_incident(coordinator, job.id, "unresolved")
+
+        assert unresolved["incident"]["last_outcome"] == "smoke_evidence_unavailable"
+        assert unresolved["proposal"] is None
+        assert (workspace / "train.py").read_text(encoding="utf-8") == original
+        runs = list((jobs.job_dir(job.id) / "incidents" / incident_id / "runs").iterdir())
+        assert len(runs) == 1
     finally:
         await coordinator.close()
 

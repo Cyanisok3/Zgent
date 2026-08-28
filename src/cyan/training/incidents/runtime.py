@@ -8,6 +8,7 @@ from cyan.agent.runner import AgentRunner, RunOutcome
 from cyan.agent.trace.writer import TraceWriter
 from cyan.config import CyanConfig
 from cyan.training.incidents.context import MAX_INITIAL_EVIDENCE_BYTES
+from cyan.training.incidents.evidence import SmokeEvidenceSelection, select_smoke_evidence
 from cyan.training.incidents.models import FailureCapsule
 from cyan.training.incidents.profile import build_incident_profile
 from cyan.training.incidents.selector import select_evidence
@@ -67,6 +68,57 @@ class IncidentRuntime:
 
             self._store.update_run(incident_id, run_id, mark_log_changed)
             return RunOutcome("failed", "", "log_changed")
+        smoke_evidence: SmokeEvidenceSelection | None = None
+        if run.trigger == "smoke_failed":
+            if run.smoke_proposal_id is None:
+                def mark_smoke_unavailable(current: IncidentRun) -> None:
+                    current.status = "failed"
+                    current.reason = "smoke_evidence_unavailable"
+
+                self._store.update_run(incident_id, run_id, mark_smoke_unavailable)
+                self._store.update_incident(
+                    incident_id,
+                    lambda current: setattr(
+                        current,
+                        "last_outcome",
+                        "smoke_evidence_unavailable",
+                    ),
+                )
+                return RunOutcome("failed", "", "smoke_evidence_unavailable")
+            smoke_stdout, smoke_stderr = self._store.smoke_log_paths(
+                incident_id,
+                run.smoke_proposal_id,
+            )
+            try:
+                smoke_evidence = await asyncio.to_thread(
+                    select_smoke_evidence,
+                    smoke_stdout,
+                    smoke_stderr,
+                    incident_id,
+                    run.smoke_proposal_id,
+                )
+            except (OSError, ValueError):
+                smoke_evidence = None
+            if (
+                smoke_evidence is None
+                or not smoke_evidence.blocks
+                or smoke_evidence.stdout_sha256 != run.smoke_stdout_sha256
+                or smoke_evidence.stderr_sha256 != run.smoke_stderr_sha256
+            ):
+                def mark_smoke_unavailable(current: IncidentRun) -> None:
+                    current.status = "failed"
+                    current.reason = "smoke_evidence_unavailable"
+
+                self._store.update_run(incident_id, run_id, mark_smoke_unavailable)
+                self._store.update_incident(
+                    incident_id,
+                    lambda current: setattr(
+                        current,
+                        "last_outcome",
+                        "smoke_evidence_unavailable",
+                    ),
+                )
+                return RunOutcome("failed", "", "smoke_evidence_unavailable")
         refs = [
             {
                 "source": item.source,
@@ -77,13 +129,27 @@ class IncidentRuntime:
             }
             for item in selection.references
         ]
+        if smoke_evidence is not None:
+            refs.extend(
+                {
+                    "source": block.source,
+                    "reference": block.reference,
+                    "kind": "smoke_tail",
+                    "selection_reason": block.description,
+                    "sha256": block.sha256,
+                }
+                for block in smoke_evidence.blocks
+            )
+
         def mark_running(current: IncidentRun) -> None:
             current.status = "running"
             current.selected_evidence = refs
             current.stdout_sha256 = selection.stdout_sha256
             current.stderr_sha256 = selection.stderr_sha256
             current.scanned_bytes = selection.scanned_bytes
-            current.selected_bytes = selection.selected_bytes
+            current.selected_bytes = selection.selected_bytes + (
+                smoke_evidence.selected_bytes if smoke_evidence else 0
+            )
             current.duplicates_removed = selection.duplicates_removed
 
         self._store.update_run(incident_id, run_id, mark_running)
@@ -95,6 +161,7 @@ class IncidentRuntime:
             selection,
             run.instruction,
             run.previous_outcome_summary,
+            smoke_evidence,
         )
         runner = AgentRunner(
             self._config,

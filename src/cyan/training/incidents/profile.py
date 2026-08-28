@@ -6,7 +6,7 @@ from typing import Any
 from cyan.agent.runner import RunProfile
 from cyan.agent.tools.builtin import ListDirTool, ReadFileTool, SearchTextTool
 from cyan.training.incidents.context import MAX_INPUT_BYTES, build_incident_context
-from cyan.training.incidents.evidence import _reference_was_observed
+from cyan.training.incidents.evidence import SmokeEvidenceSelection, _reference_was_observed
 from cyan.training.incidents.log_tool import FileJobLogReader, ReadJobLogTool
 from cyan.training.incidents.models import EvidenceRef, FailureCapsule, Incident
 from cyan.training.incidents.patch import PatchService
@@ -25,6 +25,7 @@ def build_incident_profile(
     selection: EvidenceSelection,
     instruction: str,
     previous_outcome_summary: dict[str, Any] | None = None,
+    smoke_evidence: SmokeEvidenceSelection | None = None,
 ) -> RunProfile:
     root = Path(incident.workspace_root).resolve(strict=True)
     context = build_incident_context(
@@ -33,6 +34,12 @@ def build_incident_profile(
         selection,
         instruction,
         previous_outcome_summary,
+        supplemental_content=smoke_evidence.content if smoke_evidence else "",
+        supplemental_refs=(
+            {block.reference for block in smoke_evidence.blocks}
+            if smoke_evidence
+            else None
+        ),
     )
     observed_refs = set(context.evidence_refs)
     stderr_reference = (

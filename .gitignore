@@ -37,3 +37,7 @@ node_modules/
 workspace/
 /user-tests/FastestDet-cyan/
 /mattpocock-skills/
+
+# 本地工作产物（非交付物）
+.scratch/
+.cyan-teach/

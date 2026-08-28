@@ -19,7 +19,7 @@ from cyan.training.events import (
     PatchProposedEvent,
     SmokeFinishedEvent,
 )
-from cyan.training.incidents.evidence import build_failure_capsule
+from cyan.training.incidents.evidence import build_failure_capsule, select_smoke_evidence
 from cyan.training.incidents.fsm import Event, accepts, recover_action, transition
 from cyan.training.incidents.models import FailureCapsule, Incident, IncidentStatus
 from cyan.training.incidents.patch import PatchError, PatchService
@@ -150,6 +150,9 @@ class IncidentCoordinator:
         instruction: str,
         attempt_id: str | None = None,
         previous_outcome_summary: dict[str, Any] | None = None,
+        smoke_proposal_id: str | None = None,
+        smoke_stdout_sha256: str | None = None,
+        smoke_stderr_sha256: str | None = None,
     ) -> str:
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         run = store.create_run(
@@ -163,11 +166,16 @@ class IncidentCoordinator:
                 if previous_outcome_summary is None
                 else previous_outcome_summary
             ),
+            smoke_proposal_id=smoke_proposal_id,
+            smoke_stdout_sha256=smoke_stdout_sha256,
+            smoke_stderr_sha256=smoke_stderr_sha256,
         )
-        store.update_incident(
-            incident.id,
-            lambda current: setattr(current, "active_run_id", run.run_id),
-        )
+        # 标记新一轮运行并清除上一轮的用户提示
+        def mark_run(current: Incident) -> None:
+            current.active_run_id = run.run_id
+            current.last_outcome = None
+
+        store.update_incident(incident.id, mark_run)
         self._spawn(
             self._run_diagnosis(store, incident.id, run.run_id),
             f"incident-run-{incident.id}-{run.run_id}",
@@ -464,7 +472,7 @@ class IncidentCoordinator:
         patch_service: PatchService,
     ) -> bool:
         spec = self._jobs.read_spec(incident.job_id)
-        directory = store.incident_dir(incident.id)
+        stdout_path, stderr_path = store.smoke_log_paths(incident.id, proposal_id)
 
         async def smoke_started(pid: int, process_identity: str) -> None:
             store.write_smoke_execution(
@@ -480,8 +488,8 @@ class IncidentCoordinator:
                 config,
                 cwd=spec.workspace_root,
                 env=spec.env,
-                stdout_path=directory / "smoke.stdout.log",
-                stderr_path=directory / "smoke.stderr.log",
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
                 on_started=smoke_started,
             )
         except (OSError, RuntimeError, ValueError):
@@ -489,8 +497,8 @@ class IncidentCoordinator:
                 status="failed",
                 returncode=None,
                 elapsed_ms=0,
-                stdout_path=directory / "smoke.stdout.log",
-                stderr_path=directory / "smoke.stderr.log",
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
             )
         current = store.read_incident(incident.id)
         if current.smoke_execution is not None:
@@ -518,6 +526,15 @@ class IncidentCoordinator:
             await self._dispatch(store, current.id, Event.SMOKE_FAILED_ROLLBACK_BLOCKED)
             return False
         try:
+            smoke_evidence = select_smoke_evidence(
+                stdout_path,
+                stderr_path,
+                current.id,
+                proposal_id,
+            )
+        except (OSError, ValueError):
+            smoke_evidence = None
+        try:
             await patch_service.reverse(
                 current.proposal, store.patch_path(current.proposal), current.apply_receipt
             )
@@ -527,6 +544,17 @@ class IncidentCoordinator:
         previous = self._previous_outcome(current)
         store.clear_agent_artifacts(incident.id)
         current = store.read_incident(incident.id)
+        if smoke_evidence is None or not smoke_evidence.blocks:
+            store.update_incident(
+                current.id,
+                lambda item: setattr(item, "last_outcome", "smoke_evidence_unavailable"),
+            )
+            await self._dispatch(
+                store,
+                current.id,
+                Event.SMOKE_FAILED_ROLLED_BACK_NO_EVIDENCE,
+            )
+            return False
         current = await self._dispatch(store, current.id, Event.SMOKE_FAILED_ROLLED_BACK)
         self._start_run(
             store,
@@ -537,6 +565,9 @@ class IncidentCoordinator:
                 "inspect its result and revise."
             ),
             previous_outcome_summary=previous,
+            smoke_proposal_id=proposal_id,
+            smoke_stdout_sha256=smoke_evidence.stdout_sha256,
+            smoke_stderr_sha256=smoke_evidence.stderr_sha256,
         )
         return False
 
@@ -555,15 +586,24 @@ class IncidentCoordinator:
             incident.id,
             execution.model_copy(update={"status": "interrupted", "finished_at": finished}),
         )
-        directory = store.incident_dir(incident.id)
+        proposal_id = incident.proposal.id if incident.proposal is not None else None
+        if proposal_id is not None:
+            stdout_path, stderr_path = store.smoke_log_paths(incident.id, proposal_id)
+        else:
+            # 兼容升级前尚未绑定 Proposal 专属路径的遗留运行记录
+            directory = store.incident_dir(incident.id)
+            stdout_path, stderr_path = (
+                directory / "smoke.stdout.log",
+                directory / "smoke.stderr.log",
+            )
         store.write_smoke_result(
             incident.id,
             SmokeResult(
                 status="interrupted",
                 returncode=None,
                 elapsed_ms=max(0, int((finished - execution.started_at).total_seconds() * 1000)),
-                stdout_path=directory / "smoke.stdout.log",
-                stderr_path=directory / "smoke.stderr.log",
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
             ),
         )
         await self._set_status(store, incident.id, "unresolved")

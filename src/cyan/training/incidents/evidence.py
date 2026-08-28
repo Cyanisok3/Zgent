@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from cyan.training.incidents.models import FailureCapsule, LogSnapshot
 from cyan.training.jobs.models import FailureRecord
 from cyan.training.jobs.store import JobStore
 
 _CAPSULE_LOG_BYTES = 32 * 1024
+_SMOKE_EVIDENCE_BYTES = 16 * 1024
 _SAFE_ENV_NAMES = frozenset(
     {
         "CONDA_DEFAULT_ENV",
@@ -127,6 +131,135 @@ def _tail_text(path: Path, limit: int) -> str:
         handle.seek(max(0, size - limit))
         raw = handle.read(limit)
     return raw.decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True)
+class SmokeEvidenceBlock:
+    source: Literal["stdout", "stderr"]
+    reference: str
+    description: str
+    sha256: str
+    start: int
+    end: int
+    byte_length: int
+    content: str
+
+
+@dataclass(frozen=True)
+class SmokeEvidenceSelection:
+    content: str
+    blocks: tuple[SmokeEvidenceBlock, ...]
+    stdout_sha256: str
+    stderr_sha256: str
+
+    # 返回本次 Smoke 证据正文的字节数
+    @property
+    def selected_bytes(self) -> int:
+        return sum(block.byte_length for block in self.blocks)
+
+
+# 从 Smoke 日志尾部构造带三字段 JSON 头的有限证据块
+def _smoke_block(
+    path: Path,
+    source: Literal["stdout", "stderr"],
+    incident_id: str,
+    proposal_id: str,
+    budget: int,
+) -> SmokeEvidenceBlock | None:
+    if budget <= 0 or not path.exists():
+        return None
+    size = path.stat().st_size
+    if size == 0:
+        return None
+    with path.open("rb") as handle:
+        handle.seek(max(0, size - min(size, budget)))
+        raw = handle.read(min(size, budget))
+    description = f"latest Smoke {source} output"
+    while raw:
+        start = size - len(raw)
+        reference = f"{source}:smoke-{incident_id}/{proposal_id}@bytes:{start}-{size}"
+        header = json.dumps(
+            {
+                "source": source,
+                "reference": reference,
+                "description": description,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        encoded_size = len(header.encode("utf-8")) + 1 + len(raw)
+        if encoded_size <= budget:
+            return SmokeEvidenceBlock(
+                source=source,
+                reference=reference,
+                description=description,
+                sha256=_sha256_file(path),
+                start=start,
+                end=size,
+                byte_length=len(raw),
+                content=raw.decode("utf-8", errors="replace"),
+            )
+        raw = raw[max(1, encoded_size - budget) :]
+    return None
+
+
+# 以 stderr 优先、固定总预算选择 Proposal 对应的 Smoke 输出
+def select_smoke_evidence(
+    stdout_path: Path,
+    stderr_path: Path,
+    incident_id: str,
+    proposal_id: str,
+    max_bytes: int = _SMOKE_EVIDENCE_BYTES,
+) -> SmokeEvidenceSelection:
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    blocks: list[SmokeEvidenceBlock] = []
+    remaining = max_bytes
+    candidates: tuple[
+        tuple[Literal["stderr", "stdout"], Path],
+        tuple[Literal["stderr", "stdout"], Path],
+    ] = (("stderr", stderr_path), ("stdout", stdout_path))
+    for source, path in candidates:
+        separator = 1 if blocks else 0
+        block = _smoke_block(
+            path,
+            source,
+            incident_id,
+            proposal_id,
+            remaining - separator,
+        )
+        if block is None:
+            continue
+        blocks.append(block)
+        rendered = json.dumps(
+            {
+                "source": block.source,
+                "reference": block.reference,
+                "description": block.description,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ) + "\n" + block.content
+        remaining -= separator + len(rendered.encode("utf-8"))
+    return SmokeEvidenceSelection(
+        content="\n".join(
+            json.dumps(
+                {
+                    "source": block.source,
+                    "reference": block.reference,
+                    "description": block.description,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+            + block.content
+            for block in blocks
+        ),
+        blocks=tuple(blocks),
+        stdout_sha256=_sha256_file(stdout_path),
+        stderr_sha256=_sha256_file(stderr_path),
+    )
 
 
 # 从完整启动环境提取有限且不含凭据的诊断摘要

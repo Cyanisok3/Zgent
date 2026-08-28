@@ -102,8 +102,9 @@ artifact；非 Git workspace 可以诊断和审阅 diff，但不能一键应用�
 ~/.cyan/jobs/<job_id>/incidents/<incident_id>/
 ├── incident.json
 ├── proposal.diff              # 有 proposal 时才存在
-├── smoke.stdout.log           # 运行 smoke 时才存在
-├── smoke.stderr.log
+├── smoke/<proposal_id>/       # 运行 smoke 时才存在
+│   ├── stdout.log
+│   └── stderr.log
 └── runs/<run_id>/{run.json,events.jsonl}
 ```
 
@@ -122,7 +123,8 @@ timeout_s = 300
 ```
 
 Smoke 由用户声明，Agent 不能修改。Smoke 失败时，仅在目标仍保持 apply 后哈希时反向应用补丁；
-最终真值始终是原训练命令的真实退出码。
+若 Smoke 有可用输出，Cyan 会将对应 Proposal 的有界尾部证据带入新的诊断 Run；若两路均无输出，
+补丁仍会回滚但不会盲目再次调用 Agent。最终真值始终是原训练命令的真实退出码。
 
 ## 架构
 

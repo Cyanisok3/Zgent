@@ -1,7 +1,13 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { initialTailOffset, terminalText } from "../src/terminalSupport";
-import { JobSnapshot, diagnosisMarkdown, isActiveJob, statusPresentation } from "../src/types";
+import {
+  JobSnapshot,
+  diagnosisDisposition,
+  diagnosisMarkdown,
+  isActiveJob,
+  statusPresentation,
+} from "../src/types";
 
 // 构造最小 Job 快照供纯状态映射测试复用
 function snapshot(jobStatus: string, incidentStatus?: string): JobSnapshot {
@@ -74,6 +80,28 @@ test("diagnosisMarkdown renders evidence", () => {
   };
   const rendered = diagnosisMarkdown(value);
   assert.match(rendered, /CUDA checkpoint/);
-  assert.match(rendered, /90%/);
+  assert.match(rendered, /Repair decision:/);
+  assert.match(rendered, /direct/);
   assert.match(rendered, /stderr:0-120/);
+  assert.equal(
+    diagnosisDisposition(value),
+    "The cause is evidence-backed but outside cyan's safe single-file repair boundary.",
+  );
+});
+
+// 功能：验证 VS Code 对推断根因显示安全的 abstention 说明
+// 设计：不提供 Proposal，确保 UI 不把模型置信度渲染成可执行建议
+test("diagnosisDisposition explains inferred repair abstention", () => {
+  const value = snapshot("failed", "unresolved");
+  value.diagnosis = {
+    id: "diagnosis-2",
+    category: "runtime",
+    summary: "runtime failure",
+    root_cause: "Inference — not directly established by observed evidence: producer mismatch",
+    confidence: 0.99,
+    causal_support: "inferred",
+    patch_recommended: false,
+    evidence: [],
+  };
+  assert.match(diagnosisDisposition(value), /inferred/);
 });

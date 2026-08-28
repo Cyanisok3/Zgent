@@ -137,3 +137,31 @@ async def test_runtime_marks_missing_diagnosis_as_failed(
     persisted = store.read_run(incident_id, run_id)
     assert persisted.status == "failed"
     assert persisted.reason == "diagnosis_missing"
+
+
+# 功能：验证 Smoke 重诊缺少输出时稳定失败且 Incident 保存原因码
+# 设计：创建真实 prepared Run 但不生成 Smoke 日志，确保 Runtime 不调用 Agent
+@pytest.mark.asyncio
+async def test_runtime_marks_missing_smoke_evidence_as_failed(tmp_path: Path) -> None:
+    jobs, store, incident_id, _run_id = _seed_runtime(tmp_path)
+    run = store.create_run(
+        incident_id,
+        "run-smoke",
+        "smoke_failed",
+        "inspect smoke",
+        smoke_proposal_id="proposal-1",
+        smoke_stdout_sha256=hashlib.sha256(b"").hexdigest(),
+        smoke_stderr_sha256=hashlib.sha256(b"").hexdigest(),
+    )
+
+    outcome = await IncidentRuntime(
+        jobs,
+        store,
+        CyanConfig(),
+        bus=EventBus(),
+    ).run(incident_id, run.run_id)
+
+    assert outcome.status == "failed"
+    assert outcome.reason == "smoke_evidence_unavailable"
+    assert store.read_run(incident_id, run.run_id).reason == "smoke_evidence_unavailable"
+    assert store.read_incident(incident_id).last_outcome == "smoke_evidence_unavailable"

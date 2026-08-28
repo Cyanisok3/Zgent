@@ -11,7 +11,9 @@ from cyan.tui.app import (
     CyanTuiApp,
     _actionable_jobs,
     _diagnosis_body,
+    _diagnosis_disposition,
     _incident_action_choices,
+    _incident_outcome_text,
     _log_result,
 )
 
@@ -74,6 +76,17 @@ def test_log_and_diagnosis_helpers() -> None:
     assert _diagnosis_body({"summary": "Shape mismatch", "root_cause": "bad batch"}) == (
         "Shape mismatch\nRoot cause: bad batch"
     )
+    assert "inferred" in _diagnosis_disposition(
+        {"causal_support": "inferred", "patch_recommended": False},
+        {},
+        "unresolved",
+    )
+    assert "proposal is ready" in _diagnosis_disposition(
+        {"causal_support": "direct", "patch_recommended": True},
+        {"id": "proposal-1"},
+        "awaiting_approval",
+    )
+    assert "no Smoke output" in _incident_outcome_text("smoke_evidence_unavailable")
 
 
 # 功能：验证普通文本不会创建 Agent run 或调用任何 IPC 命令

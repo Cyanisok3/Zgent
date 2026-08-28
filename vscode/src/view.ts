@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { JobSnapshot, isActiveJob } from "./types";
+import { JobSnapshot, diagnosisDisposition, isActiveJob } from "./types";
 
 type NodeKind =
   | "action"
@@ -131,8 +131,8 @@ export class CyanTreeProvider implements vscode.TreeDataProvider<CyanNode> {
       children.push({
         kind: "diagnosis",
         label: snapshot.diagnosis.summary,
-        description: `${Math.round(snapshot.diagnosis.confidence * 100)}%`,
-        tooltip: snapshot.diagnosis.root_cause,
+        description: snapshot.diagnosis.causal_support,
+        tooltip: diagnosisDisposition(snapshot),
         command: { command: "cyan.openDiagnosis", title: "Open Diagnosis" },
         icon: "lightbulb",
         children: snapshot.diagnosis.evidence.map((evidence) => ({
@@ -144,9 +144,17 @@ export class CyanTreeProvider implements vscode.TreeDataProvider<CyanNode> {
         })),
       });
     } else {
+      const noEvidence = incident.last_outcome === "smoke_evidence_unavailable";
       children.push({
         kind: "detail",
-        label: incident.status === "diagnosing" ? "Agent is investigating…" : incident.status,
+        label: noEvidence
+          ? "Smoke failed; no output for re-diagnosis"
+          : incident.status === "diagnosing"
+            ? "Agent is investigating…"
+            : incident.status,
+        tooltip: noEvidence
+          ? "The patch was rolled back, but Smoke produced no usable output."
+          : undefined,
         icon: incident.status === "diagnosing" ? "sync~spin" : "info",
       });
     }

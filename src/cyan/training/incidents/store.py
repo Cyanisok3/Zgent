@@ -23,6 +23,11 @@ class IncidentRun(BaseModel):
     attempt_id: str
     trigger: RunTrigger
     instruction: str
+    smoke_proposal_id: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    )
+    smoke_stdout_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    smoke_stderr_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     status: str = "prepared"
     selected_evidence: list[dict[str, Any]] = Field(default_factory=list)
     stdout_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -83,6 +88,16 @@ class IncidentStore:
     def incident_path(self, incident_id: str) -> Path:
         return self.incident_dir(incident_id) / "incident.json"
 
+    # 返回指定 Proposal 的 Smoke 输出目录，避免不同提案相互覆盖日志
+    def smoke_dir(self, incident_id: str, proposal_id: str) -> Path:
+        _validate_id(proposal_id)
+        return self.incident_dir(incident_id) / "smoke" / proposal_id
+
+    # 返回指定 Proposal 的 Smoke stdout/stderr 路径
+    def smoke_log_paths(self, incident_id: str, proposal_id: str) -> tuple[Path, Path]:
+        directory = self.smoke_dir(incident_id, proposal_id)
+        return directory / "stdout.log", directory / "stderr.log"
+
     # 原子保存 Incident 当前快照
     def write_incident(self, incident: Incident) -> None:
         _write_model(self.incident_path(incident.id), incident)
@@ -111,6 +126,9 @@ class IncidentStore:
         *,
         attempt_id: str | None = None,
         previous_outcome_summary: dict[str, Any] | None = None,
+        smoke_proposal_id: str | None = None,
+        smoke_stdout_sha256: str | None = None,
+        smoke_stderr_sha256: str | None = None,
     ) -> IncidentRun:
         now = datetime.now(UTC)
         run = IncidentRun(
@@ -118,6 +136,9 @@ class IncidentStore:
             attempt_id=attempt_id or self.read_incident(incident_id).attempt_id,
             trigger=trigger,
             instruction=instruction,
+            smoke_proposal_id=smoke_proposal_id,
+            smoke_stdout_sha256=smoke_stdout_sha256,
+            smoke_stderr_sha256=smoke_stderr_sha256,
             previous_outcome_summary=previous_outcome_summary,
             created_at=now,
             updated_at=now,

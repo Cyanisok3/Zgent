@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from cyan.training.incidents.evidence import select_smoke_evidence
 from cyan.training.incidents.smoke import (
     SmokeVerifierConfig,
     SubprocessSmokeExecutor,
@@ -69,6 +71,30 @@ def test_smoke_verifier_fingerprint_is_stable_and_content_bound() -> None:
     assert len(fingerprint) == 64
     assert smoke_verifier_fingerprint(equivalent) == fingerprint
     assert smoke_verifier_fingerprint(changed) != fingerprint
+
+
+# 功能：验证 Smoke 失败证据按 stderr 优先并限制在固定总预算内
+# 设计：写入超预算双流日志，检查三字段头、稳定引用和不读入完整正文的结果边界
+def test_select_smoke_evidence_is_stderr_first_and_bounded(tmp_path: Path) -> None:
+    stdout_path = tmp_path / "stdout.log"
+    stderr_path = tmp_path / "stderr.log"
+    stdout_path.write_bytes(b"stdout-noise\n" * 4096)
+    stderr_path.write_bytes(b"stderr-root-cause\n" * 4096)
+
+    selection = select_smoke_evidence(
+        stdout_path,
+        stderr_path,
+        "incident-1",
+        "proposal-1",
+    )
+
+    assert len(selection.content.encode("utf-8")) <= 16 * 1024
+    assert selection.blocks[0].source == "stderr"
+    assert selection.blocks[0].reference.startswith(
+        "stderr:smoke-incident-1/proposal-1@bytes:"
+    )
+    header = selection.content.splitlines()[0]
+    assert set(json.loads(header)) == {"source", "reference", "description"}
 
 
 # 功能：验证真实 smoke 执行器按退出码判定成功并无损保存两个输出流

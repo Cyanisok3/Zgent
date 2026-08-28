@@ -123,8 +123,9 @@ workspace/path checks, `git apply --check`, application, and safe reverse applic
 ~/.cyan/jobs/<job_id>/incidents/<incident_id>/
 ├── incident.json
 ├── proposal.diff              # only while a proposal exists
-├── smoke.stdout.log           # only if smoke ran
-├── smoke.stderr.log           # only if smoke ran
+├── smoke/<proposal_id>/       # only if smoke ran
+│   ├── stdout.log
+│   └── stderr.log
 └── runs/<run_id>/{run.json,events.jsonl}
 ```
 
@@ -136,6 +137,10 @@ starts. Old `~/.cyan/sessions` is neither migrated nor read.
 
 Raw process output remains only in Attempt logs. IPC queues are bounded; daemon trace stores summaries,
 not log, patch, tool-I/O or user text payloads.
+
+Failed or timed-out Smoke output is stored under its Proposal-specific directory and contributes a
+bounded 16 KiB evidence tail to a follow-up Incident Run. If both Smoke streams are empty or
+unavailable, the patch is rolled back and the Incident becomes unresolved without another Agent call.
 
 ### Configuration and recovery
 

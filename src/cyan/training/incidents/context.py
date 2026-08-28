@@ -9,7 +9,7 @@ from cyan.training.incidents.selector import EvidenceSelection
 
 MAX_INPUT_BYTES = 128 * 1024
 MAX_INITIAL_EVIDENCE_BYTES = 32 * 1024
-INCIDENT_PROMPT_VERSION = "causal-support-abstention-v6"
+INCIDENT_PROMPT_VERSION = "causal-support-abstention-v7"
 
 
 @dataclass
@@ -26,8 +26,11 @@ def build_incident_context(
     selection: EvidenceSelection,
     instruction: str,
     previous_outcome_summary: dict[str, Any] | None = None,
+    supplemental_content: str = "",
+    supplemental_refs: set[str] | None = None,
 ) -> IncidentContext:
     evidence_refs = {item.as_reference(capsule) for item in selection.references}
+    evidence_refs.update(supplemental_refs or set())
     previous: dict[str, Any] = dict(previous_outcome_summary or {})
     if incident.diagnosis is not None:
         previous.setdefault("diagnosis", incident.diagnosis.model_dump(mode="json"))
@@ -57,6 +60,8 @@ def build_incident_context(
         "producer-consumer contract assumptions remain unverified; in that case set it false. "
         "For external data, environment or framework limitations, dependency changes, "
         "multi-file fixes, or insufficient evidence, set it false and stop after diagnosis. "
+        "For a direct diagnosis that is outside the safe single-file boundary, append a "
+        "concise 'Manual next action' to root_cause; do not present it as an automatic patch. "
         "Once the observed traceback and workspace producer establish the relevant contract, "
         "submit the diagnosis immediately; abstaining does not require exhaustively tracing "
         "third-party framework internals. Use read-only tools only when they add causal "
@@ -67,6 +72,7 @@ def build_incident_context(
         "A diagnosis without a patch is valid. Evidence must cite observed references.\n\n"
         f"Failure capsule:\n{capsule.model_dump_json(indent=2)}\n\n"
         f"Selected evidence:\n{selection.content}\n\n"
+        f"Smoke evidence:\n{supplemental_content or '(none available)'}\n\n"
         f"Previous bounded outcome:\n{json.dumps(previous, ensure_ascii=False, default=str)}\n\n"
         f"Current instruction:\n{instruction}"
     )
