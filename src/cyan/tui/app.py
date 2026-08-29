@@ -20,6 +20,7 @@ from textual.message import Message
 from textual.widgets import Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
+import cyan
 from cyan.service.protocol.commands import WIRE_PROTOCOL_VERSION
 from cyan.service.transport.socket_client import IpcError, SocketClient
 from cyan.training.jobs.launch import (
@@ -607,7 +608,7 @@ class CyanTuiApp(App[None]):
                 await client.send_command(
                     "core.ping",
                     {
-                        "client": "cyan/0.0.1",
+                        "client": f"cyan/{cyan.__version__}",
                         "protocol_version": WIRE_PROTOCOL_VERSION,
                     },
                 )

@@ -8,7 +8,22 @@ cyan 不做论文检索、指标优化、超参数搜索、实验循环或通用
 
 ## 快速开始
 
-要求 Python 3.12，并在本地安装 `cyan`：
+Alpha 版本要求 Python 3.12。发行包名是 `cyan-incident`，安装后命令仍是 `cyan`：
+
+```bash
+uv tool install cyan-incident==0.1.0a1
+# 或：pipx install cyan-incident==0.1.0a1
+```
+
+升级或卸载：
+
+```bash
+uv tool upgrade cyan-incident
+uv tool uninstall cyan-incident
+```
+
+Incident Agent 需要一个 Anthropic-compatible API；daemon 的训练监督和本地 TUI 不依赖模型调用。
+复制模板并填写自己的 API Key 后，在训练项目目录启动：
 
 ```bash
 cp .env.example .env
@@ -148,9 +163,10 @@ uv run python scripts/gen_protocol_doc.py --check
 
 [`benchmarks/`](benchmarks/) 提供与产品环境隔离的 15 个真实训练故障和 3 个正常 Control，包含
 固定上游来源、三次准入、四种无工具检索/诊断基线及完整 Cyan 闭环。冻结测试集当前的
-resolved rate 为 40.74%，正常产品路径 9/9 未误触发 Incident；完整结果、分阶段分析与限制见
-[`formal-v1` 报告](benchmarks/reports/formal-v1/report.md)。自动语义评分只是关键词下界，独立
-人工盲审尚未完成。
+resolved rate 为 40.74%（11/27）；其中可修复案例为 61.11%（11/18），正常产品路径 9/9 未误触发
+Incident。完整结果、分阶段分析与限制见 [`formal-v1` 报告](benchmarks/reports/formal-v1/report.md)。
+自动 category/culprit/mechanism 评分只是关键词下界，人工盲审已完成并单独裁决。`gold_evidence_hit`
+混合了生命周期和诊断证据，仅作为检索参考指标，不代表端到端修复能力。
 
 ## 开发验证
 

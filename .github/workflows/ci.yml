@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install project dependencies
+        run: uv sync
+      - name: Run Python quality and tests
+        run: |
+          uv run ruff check src tests scripts
+          uv run mypy src
+          uv run pytest tests/unit -v
+          uv run pytest tests/integration -v
+          uv run pytest tests/ -v
+          uv run python scripts/gen_protocol_doc.py --check
+
+  vscode:
+    name: VS Code client
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - name: Install extension dependencies
+        working-directory: vscode
+        run: npm ci
+      - name: Lint and unit test extension
+        working-directory: vscode
+        run: |
+          npm run lint
+          npm run test:unit
+      - name: Run extension test
+        working-directory: vscode
+        run: xvfb-run -a npm run test:extension
+      - name: Package extension
+        working-directory: vscode
+        run: npm run package
+
+  package:
+    name: Build and install wheel
+    runs-on: ubuntu-latest
+    needs: [python, vscode]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Build distributions
+        run: uv build --out-dir dist
+      - name: Inspect distribution metadata and contents
+        run: |
+          python - <<'PY'
+          from email import policy
+          from email.parser import BytesParser
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          wheels = sorted(Path("dist").glob("*.whl"))
+          sdists = sorted(Path("dist").glob("*.tar.gz"))
+          assert len(wheels) == 1, wheels
+          assert len(sdists) == 1, sdists
+          with zipfile.ZipFile(wheels[0]) as archive:
+              metadata_name = next(
+                  name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+              )
+              metadata = BytesParser(policy=policy.default).parsebytes(
+                  archive.read(metadata_name)
+              )
+              assert metadata["Name"] == "cyan-incident"
+              assert metadata["Version"] == "0.1.0a1"
+              forbidden = (".env", ".cyan", "benchmarks/", "tests/", "__pycache__/")
+              assert not any(
+                  any(token in name for token in forbidden)
+                  for name in archive.namelist()
+              )
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              pkg_info = next(item for item in archive.getmembers() if item.name.endswith("/PKG-INFO"))
+              content = archive.extractfile(pkg_info)
+              assert content is not None
+              raw = content.read()
+              assert b"Name: cyan-incident" in raw
+              assert b"Version: 0.1.0a1" in raw
+              forbidden = ("/.env", "/benchmarks/", "/tests/", "/.cyan/")
+              assert not any(
+                  any(token in item.name for token in forbidden)
+                  for item in archive.getmembers()
+              )
+          PY
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyan-incident-distributions
+          path: dist/
+      - name: Install wheel in a clean virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/cyan-wheel-venv"
+          "$RUNNER_TEMP/cyan-wheel-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/cyan-wheel-venv/bin/pip" install dist/*.whl
+      - name: Verify installed CLI and daemon lifecycle
+        env:
+          HOME: ${{ runner.temp }}/cyan-wheel-home
+          CYAN_PORT: "17437"
+          CYAN_LOG_FILE: ""
+          CYAN_TRACE_ENABLED: "false"
+          ANTHROPIC_API_KEY: "not-used-by-smoke"
+          START_JSON: ${{ runner.temp }}/cyan-start.json
+        run: |
+          mkdir -p "$HOME"
+          VENV="$RUNNER_TEMP/cyan-wheel-venv"
+          test "$("$VENV/bin/cyan" --version)" = "0.1.0a1"
+          "$VENV/bin/cyan" core start --json > "$START_JSON"
+          START_JSON="$START_JSON" "$VENV/bin/python" -c 'import json, os; d=json.load(open(os.environ["START_JSON"])); assert d["protocol_version"] == 2'
+          "$VENV/bin/cyan" core stop

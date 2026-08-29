@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import cyan
 from cyan.agent.events.bus import EventBus
+from cyan.agent.llm.base import LLMProvider
 from cyan.agent.trace.record import TraceRecord
 from cyan.agent.trace.writer import TraceWriter
 from cyan.config import CyanConfig, get_config
@@ -134,10 +135,11 @@ def _config_log_data(config: CyanConfig) -> dict[str, Any]:
 
 class CoreApp:
     # 初始化双进程 daemon 的训练和 Incident 所有者
-    def __init__(self) -> None:
+    def __init__(self, *, provider: LLMProvider | None = None) -> None:
         self._start_time = time.monotonic()
         self._startup_workspace_root = Path.cwd().resolve()
         self._bus = EventBus()
+        self._provider = provider
         self._broadcaster: IpcEventBroadcaster | None = None
         self._trace: TraceWriter | None = None
         self._config: CyanConfig | None = None
@@ -548,6 +550,7 @@ class CoreApp:
             self._job_supervisor,
             self._bus,
             self._config,
+            provider=self._provider,
             trace=self._trace,
         )
         await self._incidents.recover()

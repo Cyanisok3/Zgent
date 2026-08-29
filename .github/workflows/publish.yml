@@ -1,0 +1,79 @@
+name: Publish PyPI Alpha
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Verify and publish cyan-incident
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/cyan-incident/
+    env:
+      EXPECTED_VERSION: 0.1.0a1
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Verify release version and build once
+        run: |
+          test "${RELEASE_TAG#v}" = "$EXPECTED_VERSION"
+          uv build --out-dir dist
+          python - <<'PY'
+          from email import policy
+          from email.parser import BytesParser
+          from pathlib import Path
+          import zipfile
+
+          wheel = next(Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              name = next(item for item in archive.namelist() if item.endswith(".dist-info/METADATA"))
+              metadata = BytesParser(policy=policy.default).parsebytes(archive.read(name))
+              assert metadata["Name"] == "cyan-incident"
+              assert metadata["Version"] == "0.1.0a1"
+              assert not any(
+                  token in item
+                  for item in archive.namelist()
+                  for token in (".env", "benchmarks/", "tests/", "__pycache__/")
+              )
+          PY
+      - name: Install built wheel in isolation
+        run: |
+          python -m venv "$RUNNER_TEMP/cyan-publish-venv"
+          "$RUNNER_TEMP/cyan-publish-venv/bin/pip" install dist/*.whl
+      - name: Verify installed package before upload
+        env:
+          HOME: ${{ runner.temp }}/cyan-publish-home
+          CYAN_PORT: "17438"
+          CYAN_LOG_FILE: ""
+          CYAN_TRACE_ENABLED: "false"
+          ANTHROPIC_API_KEY: "not-used-by-smoke"
+          START_JSON: ${{ runner.temp }}/cyan-publish-start.json
+        run: |
+          mkdir -p "$HOME"
+          VENV="$RUNNER_TEMP/cyan-publish-venv"
+          test "$("$VENV/bin/cyan" --version)" = "$EXPECTED_VERSION"
+          "$VENV/bin/cyan" core start --json > "$START_JSON"
+          START_JSON="$START_JSON" "$VENV/bin/python" -c 'import json, os; d=json.load(open(os.environ["START_JSON"])); assert d["protocol_version"] == 2'
+          "$VENV/bin/cyan" core stop
+      - name: Publish through PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

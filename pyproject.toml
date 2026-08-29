@@ -7,9 +7,24 @@ build-backend = "hatchling.build" # 使用 Hatchling 作为构建后端
 
 # ---- 项目元数据与运行时依赖（PEP 621）----
 [project]
-name = "cyan"
-version = "0.0.1"
+name = "cyan-incident"
+dynamic = ["version"]
+description = "A local ML-training Incident Agent with bounded diagnosis and approved repair"
+readme = "README.md"
+authors = [{ name = "Cyanisok3" }]
+license = { file = "LICENSE" }
 requires-python = ">=3.12,<3.13" # 仅支持 3.12 小版本范围，与 CI/类型检查一致
+keywords = ["machine-learning", "incident-response", "agent", "training"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "pydantic>=2.0",       # 数据校验与序列化（含 JSON 模型等）
     "python-dotenv>=1.0",  # .env 文件解析
@@ -23,9 +38,16 @@ dependencies = [
 cyan = "cyan.cli.main:main"
 cyan-core = "cyan.service.app:run"
 
+[project.urls]
+Repository = "https://github.com/Cyanisok3/Zgent"
+Issues = "https://github.com/Cyanisok3/Zgent/issues"
+
 # ---- Hatch：打 wheel 时从 src 布局收录包 ----
 [tool.hatch.build.targets.wheel]
 packages = ["src/cyan"] # 源码在 src/cyan
+
+[tool.hatch.version]
+path = "src/cyan/__init__.py"
 
 # ---- 开发期依赖（PEP 735）----
 [dependency-groups]
